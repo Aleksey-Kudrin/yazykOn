@@ -9,6 +9,8 @@ services:
       TURN_REALM: ${TURN_REALM:-yazykon.local}
       TURN_URL: ${TURN_URL:-}
       TURN_CREDENTIAL_TTL: ${TURN_CREDENTIAL_TTL:-3600}
+      ROOM_ACCESS_SECRET: ${ROOM_ACCESS_SECRET:-}
+      ROOM_ACCESS_TTL: ${ROOM_ACCESS_TTL:-86400}
     expose:
       - "3000"
 
@@ -18,6 +20,7 @@ services:
     restart: unless-stopped
     environment:
       WEBRTC_PUBLIC_IP: ${WEBRTC_PUBLIC_IP:-}
+      ROOM_ACCESS_SECRET: ${ROOM_ACCESS_SECRET:-}
     expose:
       - "4000"
     ports:
@@ -74,6 +77,7 @@ services:
       - "443:443/udp"
     environment:
       DOMAIN: ${DOMAIN:-}
+      ACME_EMAIL: ${ACME_EMAIL:-}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
