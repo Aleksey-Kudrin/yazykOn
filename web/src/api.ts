@@ -124,6 +124,14 @@ export async function createBreakoutRoom(id: string, name: string): Promise<Brea
   return data;
 }
 
+export async function deleteBreakoutRoom(roomId: string, breakoutId: string): Promise<void> {
+  const response = await fetch(apiUrl(`/api/rooms/${encodeURIComponent(roomId)}/breakouts/${encodeURIComponent(breakoutId)}`), {
+    method: "DELETE",
+    credentials: "include"
+  });
+  if (!response.ok) throw new Error(`BREAKOUT_DELETE_${response.status}`);
+}
+
 export async function assignBreakoutParticipant(roomId: string, breakoutId: string, userId: string): Promise<void> {
   const response = await fetch(`${API_URL}/api/rooms/${encodeURIComponent(roomId)}/breakouts/${encodeURIComponent(breakoutId)}/assign`, {
     method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId })
