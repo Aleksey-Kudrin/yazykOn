@@ -12,6 +12,9 @@ const rooms = Math.min(6, Math.max(2, Number(process.env.SFU_ROOM_FAILOVER_ROOMS
 const ttlMs = Number(process.env.SFU_ROOM_OWNER_TTL_MS ?? 3000);
 const secret = process.env.ROOM_ACCESS_SECRET ?? "integration-secret";
 const artifactDir = process.env.SFU_ARTIFACT_DIR ?? "artifacts";
+const maxActivePeerDelta = Number(process.env.SFU_MULTI_ROOM_MAX_ACTIVE_DELTA ?? rooms);
+const maxRoomDelta = Number(process.env.SFU_MULTI_ROOM_MAX_ROOM_DELTA ?? rooms);
+const maxTrackDelta = Number(process.env.SFU_MULTI_ROOM_MAX_TRACK_DELTA ?? rooms * 2);
 
 function token(roomId: string, userId: string) {
   const payload = Buffer.from(JSON.stringify({
@@ -147,6 +150,22 @@ test("multiple active rooms transfer ownership and reconnect on secondary", asyn
     const metricsAfter = await runtimeMetrics(secondary);
     const redisAfter = await redisRoomState(roomIds);
     expect(reconnectResults.every((item, i) => item.peerId === joined[i].peerId)).toBeTruthy();
+    expect(redisAfter.every(item => item.owner === 1 && item.state === 1)).toBeTruthy();
+    const metricDelta = (name: string) => {
+      const beforeValue = Number(metricsBefore[name]);
+      const afterValue = Number(metricsAfter[name]);
+      return Number.isFinite(beforeValue) && Number.isFinite(afterValue) ? afterValue - beforeValue : null;
+    };
+    const deltas = {
+      activePeers: metricDelta("yazykon_media_active_peers"),
+      activeRooms: metricDelta("yazykon_media_active_rooms"),
+      activeTracks: metricDelta("yazykon_media_active_tracks")
+    };
+    const resourceChecks = {
+      activePeers: deltas.activePeers === null || deltas.activePeers <= maxActivePeerDelta,
+      activeRooms: deltas.activeRooms === null || deltas.activeRooms <= maxRoomDelta,
+      activeTracks: deltas.activeTracks === null || deltas.activeTracks <= maxTrackDelta
+    };
 
     const report = {
       rooms, roomIds,
@@ -158,10 +177,16 @@ test("multiple active rooms transfer ownership and reconnect on secondary", asyn
       ownersBefore: before.map(item => item.value),
       ownersAfter: after,
       reconnectResults,
+      deltas,
+      budgets: { maxActivePeerDelta, maxRoomDelta, maxTrackDelta },
+      resourceChecks,
       pass: reconnectResults.every((item, i) => item.peerId === joined[i].peerId)
+        && redisAfter.every(item => item.owner === 1 && item.state === 1)
+        && Object.values(resourceChecks).every(Boolean)
     };
     fs.mkdirSync(artifactDir, { recursive: true });
     fs.writeFileSync(path.join(artifactDir, "sfu-multi-room-failover-report.json"), JSON.stringify(report, null, 2));
+    expect(Object.values(resourceChecks).every(Boolean)).toBeTruthy();
   } finally {
     execFileSync("docker", ["compose", "-f", composeFile, "start", "sfu-primary"], { stdio: "inherit" });
     await waitHealth(primary);
