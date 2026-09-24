@@ -42,8 +42,8 @@ async function redisOwners(roomIds: string[]) {
   return owners;
 }
 
-async function createRoom(page: import("@playwright/test").Page, roomId: string) {
-  return page.evaluate(async ({ endpoint, roomId, accessToken }) => {
+async function joinRoom(page: import("@playwright/test").Page, endpoint: string, roomId: string, peerId?: string) {
+  return page.evaluate(async ({ endpoint, roomId, accessToken, peerId }) => {
     const ws = new WebSocket(endpoint.replace(/^http/, "ws") + "/ws");
     const messages: any[] = [];
     let waiter: ((message: any) => void) | undefined;
@@ -67,72 +67,62 @@ async function createRoom(page: import("@playwright/test").Page, roomId: string)
     });
     ws.send(JSON.stringify({
       type: "join", roomId,
-      data: { accessToken, reconnect: false }
+      data: { accessToken, reconnect: Boolean(peerId), ...(peerId ? { peerId } : {}) }
     }));
     const joined = await next("joined");
-    return { peerId: joined.peerId, roomId, trackIds: [] as string[] };
-  }, {
-    endpoint: primary, roomId, accessToken: token(roomId, "owner-" + roomId)
-  });
+    ws.close();
+    return { peerId: joined.peerId, roomId };
+  }, { endpoint, roomId, peerId, accessToken: token(roomId, "owner-" + roomId) });
 }
 
-test("multiple active rooms transfer Redis ownership after SFU loss", async ({ browser }) => {
+test("multiple active rooms transfer ownership and reconnect on secondary", async ({ browser }) => {
   test.skip(!process.env.SFU_FAILOVER_LIVE, "Set SFU_FAILOVER_LIVE=1 for the live Docker run");
 
   await waitHealth(primary);
   await waitHealth(secondary);
-  const reconnectResults = await Promise.all(joined.map((item, i) => pages[i].evaluate(async ({ endpoint, roomId, peerId, accessToken }) => {
-    const ws = new WebSocket(endpoint.replace(/^http/, "ws") + "/ws");
-    const joinedPromise = new Promise<any>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("reconnect timeout")), 10000);
-      ws.onmessage = event => { const message = JSON.parse(event.data); if (message.type === "joined") { clearTimeout(timer); resolve(message); } };
-      ws.onerror = () => { clearTimeout(timer); reject(new Error("reconnect websocket failed")); };
-    });
-    await new Promise<void>((resolve, reject) => { ws.onopen = () => resolve(); ws.onerror = () => reject(new Error("reconnect open failed")); });
-    ws.send(JSON.stringify({ type: "join", roomId, data: { accessToken, reconnect: true, peerId } }));
-    const message = await joinedPromise;
-    return { peerId: message.peerId, samePeerId: message.peerId === peerId };
-  }, { endpoint: secondary, roomId: item.roomId, peerId: item.peerId, accessToken: token(item.roomId, "owner-" + item.roomId) })));
 
   const pages = await Promise.all(
     Array.from({ length: rooms }, () => browser.newPage({ permissions: ["camera", "microphone"] }))
   );
-  await Promise.all(pages.map(page => page.goto(primary + "/health")));
-
   const roomIds = Array.from({ length: rooms }, (_, i) => "FAILOVER-ROOM-" + (i + 1));
-  const joined = await Promise.all(roomIds.map((roomId, i) => createRoom(pages[i], roomId)));
+  const joined = await Promise.all(roomIds.map((roomId, i) => joinRoom(pages[i], primary, roomId)));
   expect(new Set(joined.map(item => item.peerId)).size).toBe(rooms);
 
   const before = await redisOwners(roomIds);
-  const beforeOwners = before.map(item => item.value);
-  for (const owner of before) {
-    expect(owner.value?.nodeId).toBe("integration-primary");
-  }
+  for (const owner of before) expect(owner.value?.nodeId).toBe("integration-primary");
 
   const failoverStarted = Date.now();
   execFileSync("docker", ["compose", "-f", composeFile, "stop", "sfu-primary"], { stdio: "inherit" });
-  await new Promise(resolve => setTimeout(resolve, ttlMs + 1500));
+  try {
+    await new Promise(resolve => setTimeout(resolve, ttlMs + 1500));
+    const after = await redisOwners(roomIds);
+    for (const owner of after) {
+      expect(owner.value?.nodeId).toBe("integration-secondary");
+      expect(owner.value?.endpoint).toContain("4200");
+    }
 
-  const after = await redisOwners(roomIds);
-  for (const owner of after) {
-    expect(owner.value?.nodeId).toBe("integration-secondary");
-    expect(owner.value?.endpoint).toContain("4200");
+    await waitHealth(secondary);
+    const reconnectStarted = Date.now();
+    const reconnectResults = await Promise.all(joined.map((item, i) =>
+      joinRoom(pages[i], secondary, item.roomId, item.peerId)
+    ));
+    const reconnectMs = Date.now() - reconnectStarted;
+    expect(reconnectResults.every((item, i) => item.peerId === joined[i].peerId)).toBeTruthy();
+
+    const report = {
+      rooms, roomIds,
+      failoverMs: Date.now() - failoverStarted,
+      reconnectMs,
+      ownersBefore: before.map(item => item.value),
+      ownersAfter: after,
+      reconnectResults,
+      pass: reconnectResults.every((item, i) => item.peerId === joined[i].peerId)
+    };
+    fs.mkdirSync(artifactDir, { recursive: true });
+    fs.writeFileSync(path.join(artifactDir, "sfu-multi-room-failover-report.json"), JSON.stringify(report, null, 2));
+  } finally {
+    execFileSync("docker", ["compose", "-f", composeFile, "start", "sfu-primary"], { stdio: "inherit" });
+    await waitHealth(primary);
+    await Promise.all(pages.map(page => page.close()));
   }
-
-  await waitHealth(secondary);
-  execFileSync("docker", ["compose", "-f", composeFile, "start", "sfu-primary"], { stdio: "inherit" });
-  await waitHealth(primary);
-
-  expect(reconnectResults.every(result => result.samePeerId)).toBeTruthy();
-  const report = {
-    rooms, roomIds, failoverMs: Date.now() - failoverStarted,
-    ownersBefore: beforeOwners, owners: after,
-    reconnectResults,
-    pass: after.every(owner => owner.value?.nodeId === "integration-secondary" && String(owner.value?.endpoint ?? "").includes("4200")) &&
-      reconnectResults.every(result => result.samePeerId)
-  };
-  fs.mkdirSync(artifactDir, { recursive: true });
-  fs.writeFileSync(path.join(artifactDir, "sfu-multi-room-failover-report.json"), JSON.stringify(report, null, 2));
-  expect(report.pass).toBeTruthy();
-  await Promise.all(pages.map(page => page.close()));
 });
