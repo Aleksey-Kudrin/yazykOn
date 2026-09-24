@@ -27,7 +27,7 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - name: Start Redis and two SFUs
         working-directory: .
-        run: docker compose -p yazykon-sfu-it -f e2e/docker-compose.sfu-failover.yml up -d --build
+        run: docker compose -p yazykon-sfu-it -f docker-compose.sfu-failover.yml up -d --build
       - name: Wait for SFUs
         run: |
           for url in http://127.0.0.1:4100/health http://127.0.0.1:4200/health; do
@@ -124,8 +124,8 @@ jobs:
           failed=0
           for spec in "${tests[@]}"; do
             echo "===== SFU isolated probe: $spec ====="
-            docker compose -p yazykon-sfu-it -f e2e/docker-compose.sfu-failover.yml down -v >/dev/null 2>&1 || true
-            docker compose -p yazykon-sfu-it -f e2e/docker-compose.sfu-failover.yml up -d --build
+            docker compose -p yazykon-sfu-it -f docker-compose.sfu-failover.yml down -v >/dev/null 2>&1 || true
+            docker compose -p yazykon-sfu-it -f docker-compose.sfu-failover.yml up -d --build
             ready=0
             for i in $(seq 1 60); do
               if curl -fsS http://127.0.0.1:4100/health >/dev/null && curl -fsS http://127.0.0.1:4200/health >/dev/null; then ready=1; break; fi
@@ -140,7 +140,7 @@ jobs:
             rc=$?
             if [ "$rc" -ne 0 ]; then failed=1; fi
           done
-          docker compose -p yazykon-sfu-it -f e2e/docker-compose.sfu-failover.yml down -v >/dev/null 2>&1 || true
+          docker compose -p yazykon-sfu-it -f docker-compose.sfu-failover.yml down -v >/dev/null 2>&1 || true
           exit "$failed"
       - name: Run consolidated failover gate
         if: always()
@@ -152,12 +152,12 @@ jobs:
         if: always()
         working-directory: .
         run: |
-          mkdir -p e2e/artifacts
-          docker compose -p yazykon-sfu-it -f e2e/docker-compose.sfu-failover.yml ps > e2e/artifacts/compose-ps.txt || true
-          docker compose -p yazykon-sfu-it -f e2e/docker-compose.sfu-failover.yml logs --no-color > e2e/artifacts/sfu.log || true
-          curl -fsS http://127.0.0.1:4100/metrics > e2e/artifacts/primary-metrics.txt || true
-          curl -fsS http://127.0.0.1:4200/metrics > e2e/artifacts/secondary-metrics.txt || true
-          docker stats --no-stream > e2e/artifacts/docker-stats.txt || true
+          mkdir -p artifacts
+          docker compose -p yazykon-sfu-it -f docker-compose.sfu-failover.yml ps > artifacts/compose-ps.txt || true
+          docker compose -p yazykon-sfu-it -f docker-compose.sfu-failover.yml logs --no-color > artifacts/sfu.log || true
+          curl -fsS http://127.0.0.1:4100/metrics > artifacts/primary-metrics.txt || true
+          curl -fsS http://127.0.0.1:4200/metrics > artifacts/secondary-metrics.txt || true
+          docker stats --no-stream > artifacts/docker-stats.txt || true
       - name: Upload failover artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -168,4 +168,4 @@ jobs:
       - name: Cleanup
         if: always()
         working-directory: .
-        run: docker compose -p yazykon-sfu-it -f e2e/docker-compose.sfu-failover.yml down -v
+        run: docker compose -p yazykon-sfu-it -f docker-compose.sfu-failover.yml down -v
