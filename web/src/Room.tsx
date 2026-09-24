@@ -59,6 +59,7 @@ export function Room({ roomId }: RoomProps) {
   const [hostId, setHostId] = React.useState("");
   const [sharing, setSharing] = React.useState(false);
   const screenTrack = React.useRef<MediaStreamTrack | null>(null);
+  const iceRestarting = React.useRef(false);
   const [chat, setChat] = React.useState<ChatMessage[]>([]);
   const [chatText, setChatText] = React.useState("");
   const [members, setMembers] = React.useState<RoomMember[]>([]);
@@ -127,9 +128,28 @@ export function Room({ roomId }: RoomProps) {
         };
         pc.onconnectionstatechange = () => {
           setConnected(pc.connectionState === "connected");
-          if (pc.connectionState === "connected") setStatus("Соединение установлено");
-          else if (pc.connectionState === "failed") setStatus("WebRTC: соединение не установлено");
-          else setStatus(`WebRTC: ${pc.connectionState}`);
+          if (pc.connectionState === "connected") {
+            iceRestarting.current = false;
+            setStatus("Соединение установлено");
+          } else if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
+            setStatus("WebRTC: восстанавливаем соединение…");
+            if (!iceRestarting.current && socket.current?.readyState === WebSocket.OPEN) {
+              iceRestarting.current = true;
+              void pc.createOffer({ iceRestart: true }).then(async offer => {
+                await pc.setLocalDescription(offer);
+                const ws = socket.current;
+                if (ws?.readyState === WebSocket.OPEN) {
+                  ws.send(JSON.stringify({ type: "offer", roomId, data: pc.localDescription }));
+                }
+              }).catch(error => {
+                iceRestarting.current = false;
+                console.warn("ICE restart failed", error);
+                setStatus("WebRTC: соединение не установлено");
+              });
+            }
+          } else {
+            setStatus(`WebRTC: ${pc.connectionState}`);
+          }
         };
 
         const ws = new WebSocket(mediaUrl());
