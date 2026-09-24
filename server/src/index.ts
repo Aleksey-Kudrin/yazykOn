@@ -16,6 +16,42 @@ const roomAccessTtl = Number.isFinite(roomAccessTtlValue) ? Math.max(300, roomAc
 const databaseUrl = process.env.DATABASE_URL ?? "";
 const mediaControlUrl = process.env.MEDIA_CONTROL_URL ?? "http://media:4000";
 const mediaControlSecret = process.env.MEDIA_CONTROL_SECRET ?? "";
+const allowedOrigins = new Set(
+  (process.env.WEB_ORIGINS ?? "")
+    .split(",")
+    .map(value => value.trim())
+    .filter(Boolean)
+);
+const authRate = new Map<string, { count: number; resetAt: number }>();
+const roomRate = new Map<string, { count: number; resetAt: number }>();
+
+function requestIp(req: express.Request) {
+  return req.socket.remoteAddress ?? "unknown";
+}
+
+function rateLimit(store: Map<string, { count: number; resetAt: number }>, limit: number, windowMs: number) {
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const now = Date.now();
+    const key = requestIp(req);
+    const current = store.get(key);
+    if (!current || current.resetAt <= now) {
+      store.set(key, { count: 1, resetAt: now + windowMs });
+      next();
+      return;
+    }
+    if (current.count >= limit) {
+      res.status(429).json({ error: "RATE_LIMITED" });
+      return;
+    }
+    current.count++;
+    next();
+  };
+}
+
+function isAllowedOrigin(origin: string | undefined) {
+  if (!origin) return true;
+  return allowedOrigins.size > 0 && allowedOrigins.has(origin);
+}
 const db = databaseUrl ? new Pool({ connectionString: databaseUrl }) : null;
 
 async function initDatabase() {
@@ -53,7 +89,8 @@ async function initDatabase() {
 }
 
 function authCookie(sessionId: string) {
-  return `yazykon_session=${sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`;
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  return `yazykon_session=${sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800${secure}`;
 }
 
 function readSessionId(req: express.Request) {
@@ -84,8 +121,16 @@ function issueRoomAccessToken(roomId: string, userId: string, role: RoomRole): s
 }
 
 app.use(helmet());
-app.use(cors());
-app.use(express.json());
+app.use(cors({
+  origin: (origin, callback) => {
+    if (isAllowedOrigin(origin)) callback(null, true);
+    else callback(new Error("CORS_ORIGIN_DENIED"));
+  },
+  credentials: true
+}));
+app.use(express.json({ limit: "32kb" }));
+app.use("/api/auth", rateLimit(authRate, 30, 60_000));
+app.use("/api/rooms", rateLimit(roomRate, 60, 60_000));
 
 app.get("/api/health", (_req, res) => {
   res.json({
@@ -150,7 +195,8 @@ app.post("/api/auth/login", async (req, res) => {
 
 app.post("/api/auth/logout", async (req, res) => {
   if (db) { const id=readSessionId(req); if(id) await db.query("DELETE FROM sessions WHERE id=$1",[id]); }
-  res.setHeader("Set-Cookie","yazykon_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  res.setHeader("Set-Cookie",`yazykon_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`);
   res.status(204).end();
 });
 
@@ -186,9 +232,13 @@ app.post("/api/rooms", async (req, res) => {
       const room = { id: row.id, name: row.name, createdAt: new Date(row.created_at).toISOString(), requiresPassword: Boolean(row.password_hash && row.password_salt) };
       res.status(201).json({ ...room, accessToken: issueRoomAccessToken(id, user.id, "host"), role: "host" });
       return;
-    } catch (error) {
-      if (error?.code === "23505") continue;
+    } catch (error: unknown) {
+      try { await client.query("ROLLBACK"); } catch {}
+      const code = typeof error === "object" && error !== null && "code" in error ? String((error as { code?: unknown }).code) : "";
+      if (code === "23505") continue;
       res.status(500).json({ error: "ROOM_CREATE_FAILED" }); return;
+    } finally {
+      client.release();
     }
   }
   res.status(500).json({ error: "ROOM_ID_GENERATION_FAILED" });
