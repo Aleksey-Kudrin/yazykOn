@@ -178,7 +178,8 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := first.PeerID	if id == "" {
+	id := first.PeerID
+	if id == "" {
 		id = newID()
 	}
 
