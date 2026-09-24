@@ -50,7 +50,8 @@ function rateLimit(store: Map<string, { count: number; resetAt: number }>, limit
 
 function isAllowedOrigin(origin: string | undefined) {
   if (!origin) return true;
-  return allowedOrigins.size > 0 && allowedOrigins.has(origin);
+  if (allowedOrigins.size === 0 && process.env.NODE_ENV !== "production") return true;
+  return allowedOrigins.has(origin);
 }
 const db = databaseUrl ? new Pool({ connectionString: databaseUrl }) : null;
 
