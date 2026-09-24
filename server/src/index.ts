@@ -62,7 +62,7 @@ function isAllowedOrigin(origin: string | undefined) {
 function normalizeLoginUsername(value: unknown) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
-const db = databaseUrl ? new Pool({ connectionString: databaseUrl }) : null;
+const db = databaseUrl ? new Pool({ connectionString: databaseUrl, max: Number(process.env.DB_POOL_MAX ?? 20), idleTimeoutMillis: Number(process.env.DB_POOL_IDLE_TIMEOUT_MS ?? 30000), connectionTimeoutMillis: Number(process.env.DB_POOL_CONNECTION_TIMEOUT_MS ?? 5000), maxUses: Number(process.env.DB_POOL_MAX_USES ?? 0) || undefined }) : null;
 
 async function initDatabase() {
   if (!db) return;
