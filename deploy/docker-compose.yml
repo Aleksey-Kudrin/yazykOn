@@ -7,7 +7,6 @@ services:
       NODE_ENV: production
       PORT: 3000
       DATABASE_URL: postgres://yazykon:${POSTGRES_PASSWORD:-CHANGE_ME}@postgres:5432/yazykon
-      WEB_ORIGINS: ${WEB_ORIGINS:-}
       TURN_SECRET: ${TURN_SECRET:-}
       TURN_REALM: ${TURN_REALM:-yazykon.local}
       TURN_URL: ${TURN_URL:-}
@@ -46,6 +45,7 @@ services:
       WEBRTC_PUBLIC_IP: ${WEBRTC_PUBLIC_IP:-}
       ROOM_ACCESS_SECRET: ${ROOM_ACCESS_SECRET:-}
       MEDIA_CONTROL_SECRET: ${MEDIA_CONTROL_SECRET:-}
+      WEB_ORIGINS: ${WEB_ORIGINS:-}
     expose:
       - "4000"
     ports:
