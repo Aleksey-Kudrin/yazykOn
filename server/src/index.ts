@@ -5,6 +5,7 @@ import helmet from "helmet";
 import { createServer } from "node:http";
 import { Pool } from "pg";
 import { attachSignaling } from "./signaling.js";
+import { getRedis, redisEnabled } from "./redis.js";
 
 type RoomRole = "host" | "cohost" | "member";
 
@@ -94,7 +95,17 @@ async function initDatabase() {
     text TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   );
-  CREATE INDEX IF NOT EXISTS room_messages_room_created_idx ON room_messages(room_id, created_at);`);
+  CREATE INDEX IF NOT EXISTS room_messages_room_created_idx ON room_messages(room_id, created_at);
+  CREATE TABLE IF NOT EXISTS audit_events (
+    id UUID PRIMARY KEY,
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    room_id TEXT,
+    action TEXT NOT NULL,
+    target_user_id UUID,
+    ip TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS audit_events_room_created_idx ON audit_events(room_id, created_at);`);
 }
 
 function authCookie(sessionId: string) {
@@ -140,6 +151,19 @@ app.use(cors({
 app.use(express.json({ limit: "32kb" }));
 app.use("/api/auth", rateLimit(authRate, 30, 60_000));
 app.use("/api/rooms", rateLimit(roomRate, 60, 60_000));
+
+app.get("/health", (_req, res) => res.json({ ok: true, service: "yazykOn-server" }));
+app.get("/ready", async (_req, res) => {
+  if (!db) { res.status(503).json({ ok: false, database: false }); return; }
+  try {
+    await db.query("SELECT 1");
+    const redis = redisEnabled() ? await getRedis() : null;
+    if (redisEnabled() && !redis) { res.status(503).json({ ok: false, database: true, redis: false }); return; }
+    res.json({ ok: true, database: true, redis: redisEnabled() ? true : null });
+  } catch {
+    res.status(503).json({ ok: false, database: false });
+  }
+});
 
 app.get("/api/health", (_req, res) => {
   res.json({
