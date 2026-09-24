@@ -130,6 +130,86 @@ func clusterChannel(roomID string) string {
 	return "yazykon:sfu:room:" + roomID
 }
 
+func clusterOwnerKey(roomID string) string {
+	return "yazykon:sfu:owner:" + roomID
+}
+
+func clusterNodeEndpoint() string {
+	return strings.TrimSpace(os.Getenv("SFU_WS_URL"))
+}
+
+func clusterClaimRoom(roomID string) (bool, string) {
+	clusterMu.RLock()
+	client := clusterRedis
+	nodeID := clusterNodeID
+	clusterMu.RUnlock()
+	if client == nil || !clusterReady.Load() {
+		return true, ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	key := clusterOwnerKey(roomID)
+	payload := mustJSON(map[string]any{"nodeId": nodeID, "endpoint": clusterNodeEndpoint()})
+	claimed, err := client.SetNX(ctx, key, payload, 45*time.Second).Result()
+	if err != nil {
+		log.Printf("SFU Redis room claim failed: %v", err)
+		return false, ""
+	}
+	if claimed {
+		return true, ""
+	}
+	current, err := client.Get(ctx, key).Result()
+	if err != nil {
+		return false, ""
+	}
+	var owner struct { NodeID string `json:"nodeId"`; Endpoint string `json:"endpoint"` }
+	if json.Unmarshal([]byte(current), &owner) != nil {
+		return false, ""
+	}
+	return owner.NodeID == nodeID, owner.Endpoint
+}
+
+func clusterRenewOwnedRooms() {
+	clusterMu.RLock()
+	client := clusterRedis
+	nodeID := clusterNodeID
+	clusterMu.RUnlock()
+	if client == nil || !clusterReady.Load() {
+		return
+	}
+	roomsMu.Lock()
+	roomSnapshot := make([]*Room, 0, len(rooms))
+	for _, room := range rooms { roomSnapshot = append(roomSnapshot, room) }
+	roomsMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	for _, room := range roomSnapshot {
+		key := clusterOwnerKey(room.id)
+		current, err := client.Get(ctx, key).Result()
+		if err != nil { continue }
+		var owner struct { NodeID string `json:"nodeId"` }
+		if json.Unmarshal([]byte(current), &owner) != nil || owner.NodeID != nodeID { continue }
+		payload := mustJSON(map[string]any{"nodeId": nodeID, "endpoint": clusterNodeEndpoint()})
+		_ = client.Set(ctx, key, payload, 45*time.Second).Err()
+	}
+}
+
+func clusterReleaseRoom(roomID string) {
+	clusterMu.RLock()
+	client := clusterRedis
+	nodeID := clusterNodeID
+	clusterMu.RUnlock()
+	if client == nil || !clusterReady.Load() { return }
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	key := clusterOwnerKey(roomID)
+	current, err := client.Get(ctx, key).Result()
+	if err != nil { return }
+	var owner struct { NodeID string `json:"nodeId"` }
+	if json.Unmarshal([]byte(current), &owner) != nil || owner.NodeID != nodeID { return }
+	_ = client.Del(ctx, key).Err()
+}
+
 func clusterInit() func() {
 	url := strings.TrimSpace(os.Getenv("REDIS_URL"))
 	if url == "" {
@@ -168,6 +248,7 @@ func clusterInit() func() {
 		defer ticker.Stop()
 		for range ticker.C {
 			clusterSync()
+			clusterRenewOwnedRooms()
 		}
 	}()
 	clusterSync()
@@ -579,6 +660,11 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	room := getRoom(roomID)
+	if ownerOK, ownerEndpoint := clusterClaimRoom(roomID); !ownerOK {
+		_ = pc.Close()
+		_ = conn.WriteJSON(Signal{Type: "error", Data: mustJSON(map[string]string{"code": "SFU_ROOM_OWNER", "endpoint": ownerEndpoint})})
+		return
+	}
 	room.mu.Lock()
 	existing := room.peers[id]
 	if existing != nil {
@@ -1004,6 +1090,7 @@ func removePeer(p *Peer) {
 	}
 	_ = p.pc.Close()
 	if empty {
+		clusterReleaseRoom(p.room.id)
 		roomsMu.Lock()
 		delete(rooms, p.room.id)
 		roomsMu.Unlock()
