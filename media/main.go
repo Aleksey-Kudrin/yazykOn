@@ -134,6 +134,55 @@ func clusterOwnerKey(roomID string) string {
 	return "yazykon:sfu:owner:" + roomID
 }
 
+func clusterRoomStateKey(roomID string) string {
+	return "yazykon:sfu:state:" + roomID
+}
+
+type clusterRoomState struct {
+	RoomID string `json:"roomId"`
+	HostID string `json:"hostId"`
+	Locked bool `json:"locked"`
+	Lobby bool `json:"lobby"`
+	UpdatedAt int64 `json:"updatedAt"`
+}
+
+func clusterSaveRoomState(room *Room) {
+	clusterMu.RLock()
+	client := clusterRedis
+	clusterMu.RUnlock()
+	if client == nil || !clusterReady.Load() { return }
+	room.mu.RLock()
+	state := clusterRoomState{RoomID: room.id, HostID: room.hostID, Locked: room.locked, Lobby: room.lobby, UpdatedAt: time.Now().Unix()}
+	room.mu.RUnlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = client.Set(ctx, clusterRoomStateKey(room.id), mustJSON(state), 90*time.Second).Err()
+}
+
+func clusterLoadRoomState(roomID string) (clusterRoomState, bool) {
+	clusterMu.RLock()
+	client := clusterRedis
+	clusterMu.RUnlock()
+	if client == nil || !clusterReady.Load() { return clusterRoomState{}, false }
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	raw, err := client.Get(ctx, clusterRoomStateKey(roomID)).Result()
+	if err != nil { return clusterRoomState{}, false }
+	var state clusterRoomState
+	if json.Unmarshal([]byte(raw), &state) != nil { return clusterRoomState{}, false }
+	return state, true
+}
+
+func clusterDeleteRoomState(roomID string) {
+	clusterMu.RLock()
+	client := clusterRedis
+	clusterMu.RUnlock()
+	if client == nil || !clusterReady.Load() { return }
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = client.Del(ctx, clusterRoomStateKey(roomID)).Err()
+}
+
 func clusterNodeEndpoint() string {
 	return strings.TrimSpace(os.Getenv("SFU_WS_URL"))
 }
@@ -298,6 +347,7 @@ func clusterSync() {
 	roomsMu.Unlock()
 
 	for _, room := range roomSnapshot {
+		clusterSaveRoomState(room)
 		room.mu.RLock()
 		peers := make([]*Peer, 0, len(room.peers))
 		for _, peer := range room.peers {
@@ -666,6 +716,11 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	room.mu.Lock()
+	if state, ok := clusterLoadRoomState(roomID); ok && room.hostID == "" {
+		room.hostID = state.HostID
+		room.locked = state.Locked
+		room.lobby = state.Lobby
+	}
 	existing := room.peers[id]
 	if existing != nil {
 		room.mu.Unlock()
@@ -692,6 +747,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	room.mu.Unlock()
+	clusterSaveRoomState(room)
 	me := &Peer{id: id, sessionID: newID(), userID: claims.UserID, role: claims.Role, room: room, conn: conn, pc: pc, published: make(map[string]*webrtc.TrackLocalStaticRTP), subscriptions: make(map[string]*webrtc.RTPSender)}
 
 	room.mu.Lock()
@@ -868,6 +924,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 				room.lobby = cmd.Action == "lobby-on"
 				lobby := room.lobby
 				room.mu.Unlock()
+				clusterSaveRoomState(room)
 				kind := "lobby-off"
 				if lobby { kind = "lobby-on" }
 				room.mu.RLock()
@@ -922,6 +979,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 			if cmd.Action == "lock" || cmd.Action == "unlock" {
 				room.mu.Lock(); room.locked = cmd.Action == "lock"; locked := room.locked; room.mu.Unlock()
+				clusterSaveRoomState(room)
 				kind := "room-unlocked"; if locked { kind = "room-locked" }
 				room.mu.RLock(); for _, target := range room.peers { _ = send(target, Signal{Type: kind}) }; room.mu.RUnlock()
 				continue
@@ -1088,9 +1146,12 @@ func removePeer(p *Peer) {
 			_ = send(other, Signal{Type: "host-changed", PeerID: newHost})
 		}
 	}
+	clusterSaveRoomState(p.room)
+	}
 	_ = p.pc.Close()
 	if empty {
 		clusterReleaseRoom(p.room.id)
+		clusterDeleteRoomState(p.room.id)
 		roomsMu.Lock()
 		delete(rooms, p.room.id)
 		roomsMu.Unlock()
