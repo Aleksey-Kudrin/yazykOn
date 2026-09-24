@@ -16,3 +16,10 @@ SFU_FAILOVER_LIVE=1 SFU_ROOM_OWNER_TTL_MS=3000 ROOM_ACCESS_SECRET=integration-se
 ```
 
 The browser probe publishes a fake camera track to SFU A, stops A, waits for the Redis ownership lease to expire, reconnects with the stable peer ID to SFU B, republishes media, and verifies the Redis publication has a new session ID.
+
+
+### SFU failover diagnostics
+
+The failover workflow archives Docker Compose state, SFU logs, and final `/metrics` snapshots as a GitHub Actions artifact. Failed or slow runs can therefore be inspected without immediately rerunning the scenario.
+
+Latency SLA is controlled by `SFU_FAILOVER_SLA_MS`; repeated samples are summarized as min/avg/p95/max by `sfu-failover-sla.spec.ts`.
