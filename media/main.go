@@ -211,10 +211,9 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 	for _, other := range others {
 		_ = send(other, Signal{Type: "peer-joined", PeerID: id})
 	}
-	if len(tracks) > 0 {
-		renegotiate(me)
-	}
-
+	// The browser's initial offer/answer establishes the connection. Existing
+	// remote tracks are already attached above and are included in that answer.
+	// Server-initiated renegotiation starts only after the connection is stable.
 	for {
 		var msg Signal
 		if err := conn.ReadJSON(&msg); err != nil {
@@ -227,14 +226,28 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if msg.Type == "offer" {
+				// Block server-initiated renegotiation while answering the
+				// browser's offer. Any track changes observed by OnTrack are
+				// queued and renegotiated after this exchange becomes stable.
+				me.mu.Lock()
+				if me.closed || me.negotiating {
+					me.mu.Unlock()
+					continue
+				}
+				me.negotiating = true
+				me.mu.Unlock()
+
 				if pc.SetRemoteDescription(desc) != nil {
+					negotiationFinished(me)
 					continue
 				}
 				answer, e := pc.CreateAnswer(nil)
 				if e != nil {
+					negotiationFinished(me)
 					continue
 				}
 				if pc.SetLocalDescription(answer) != nil {
+					negotiationFinished(me)
 					continue
 				}
 				b, _ := json.Marshal(pc.LocalDescription())
