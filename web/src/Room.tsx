@@ -14,7 +14,12 @@ type SignalMessage =
   | { type: "offer"; data: RTCSessionDescriptionInit }
   | { type: "answer"; data: RTCSessionDescriptionInit }
   | { type: "ice"; data: RTCIceCandidateInit }
-  | { type: "error"; error?: string; data?: { code?: string } };
+  | { type: "error"; error?: string; data?: { code?: string } }
+  | { type: "lobby-waiting" }
+  | { type: "lobby-join"; peerId: string }
+  | { type: "lobby-denied" }
+  | { type: "lobby-on" }
+  | { type: "lobby-off" };
 
 function mediaUrl() {
   const configured = import.meta.env.VITE_MEDIA_URL;
@@ -44,6 +49,9 @@ export function Room({ roomId }: RoomProps) {
   const [participants, setParticipants] = React.useState<string[]>([]);
   const [selfId, setSelfId] = React.useState("");
   const [roomLocked, setRoomLocked] = React.useState(false);
+  const [lobby, setLobby] = React.useState(false);
+  const [waiting, setWaiting] = React.useState(false);
+  const [waitingPeers, setWaitingPeers] = React.useState<string[]>([]);
   const [hostId, setHostId] = React.useState("");
   const [sharing, setSharing] = React.useState(false);
   const screenTrack = React.useRef<MediaStreamTrack | null>(null);
@@ -138,9 +146,30 @@ export function Room({ roomId }: RoomProps) {
             setParticipants([message.peerId, ...(data?.peers ?? [])]);
             setHostId(data?.hostId ?? message.peerId);
             setRoomLocked(Boolean(data?.locked));
+            setLobby(Boolean(data?.lobby));
+            setWaiting(false);
+            setWaitingPeers(current => current.filter(id => id !== message.peerId));
             setStatus("Комната подключена");
             return;
           }
+          if (message.type === "lobby-waiting") {
+            setWaiting(true);
+            setStatus("Вы в зале ожидания — ведущий должен разрешить вход");
+            return;
+          }
+          if (message.type === "lobby-join") {
+            setWaitingPeers(current => current.includes(message.peerId) ? current : [...current, message.peerId]);
+            setStatus("Новый участник ожидает входа");
+            return;
+          }
+          if (message.type === "lobby-denied") {
+            setStatus("Ведущий отклонил вход в комнату");
+            socket.current?.close();
+            peer.current?.close();
+            return;
+          }
+          if (message.type === "lobby-on") { setLobby(true); return; }
+          if (message.type === "lobby-off") { setLobby(false); setWaitingPeers([]); return; }
           if (message.type === "peer-joined") {
             setParticipants(current => current.includes(message.peerId) ? current : [...current, message.peerId]);
             setStatus("Новый участник подключился");
@@ -175,6 +204,7 @@ export function Room({ roomId }: RoomProps) {
             return;
           }
           if (message.type === "host-changed") {
+            setWaitingPeers(current => current.filter(id => id !== message.peerId));
             setHostId(message.peerId);
             setStatus("Роль ведущего передана");
             return;
@@ -282,6 +312,17 @@ export function Room({ roomId }: RoomProps) {
     ws.send(JSON.stringify({ type: "moderate", roomId, data: { action: "remove", peerId } }));
   }
 
+  function moderate(action: string, peerId?: string) {
+    const ws = socket.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || hostId !== selfId) return;
+    ws.send(JSON.stringify({ type: "moderate", roomId, data: { action, ...(peerId ? { peerId } : {}) } }));
+  }
+
+  function toggleLobby() { moderate(lobby ? "lobby-off" : "lobby-on"); }
+
+  function approveWaiting(peerId: string) { setWaitingPeers(current => current.filter(id => id !== peerId)); moderate("approve", peerId); }
+  function denyWaiting(peerId: string) { setWaitingPeers(current => current.filter(id => id !== peerId)); moderate("deny", peerId); }
+
   function toggleRoomLock() {
     const ws = socket.current;
     if (!ws || ws.readyState !== WebSocket.OPEN || hostId !== selfId) return;
@@ -311,6 +352,8 @@ export function Room({ roomId }: RoomProps) {
     <div className="meeting-status">{status} {connected ? "• online" : ""}</div>
     <aside className="participants">
       <strong>Участники ({participants.length})</strong>
+      {hostId === selfId && <div className="participant-controls"><button type="button" onClick={toggleLobby}>{lobby ? "🚪 Выключить Lobby" : "🚪 Включить Lobby"}</button>{roomLocked ? null : null}</div>}
+      {hostId === selfId && waitingPeers.length > 0 && <div className="lobby-waiting"><strong>Ожидают входа ({waitingPeers.length})</strong>{waitingPeers.map(id => <div key={id} className="participant"><code>{id.slice(0, 8)}</code><button type="button" onClick={() => approveWaiting(id)}>Разрешить вход</button><button type="button" onClick={() => denyWaiting(id)}>Отклонить</button></div>)}</div>}
       {participants.map(id => <div key={id} className="participant">{id === selfId ? "Вы" : "Участник"} <code>{id.slice(0, 8)}</code>{id === hostId ? " • ведущий" : ""}{hostId === selfId && id !== selfId ? <><button type="button" onClick={() => muteParticipant(id)}>Микрофон</button><button type="button" onClick={() => removeParticipant(id)}>Удалить</button></> : null}</div>)}
       {hostId === selfId && <button type="button" onClick={() => toggleRoomLock()}>{roomLocked ? "🔓 Открыть комнату" : "🔒 Заблокировать комнату"}</button>}
     </aside>
