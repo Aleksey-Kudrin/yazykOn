@@ -5,7 +5,8 @@ import helmet from "helmet";
 import { createServer } from "node:http";
 import { Pool } from "pg";
 import { attachSignaling } from "./signaling.js";
-import { createRoom, getRoom, verifyRoomPassword } from "./rooms.js";
+
+type RoomRole = "host" | "cohost" | "member";
 
 const app = express();
 const port = Number(process.env.PORT ?? 3000);
@@ -38,7 +39,15 @@ async function initDatabase() {
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   );
   CREATE INDEX IF NOT EXISTS sessions_user_id_idx ON sessions(user_id);
-  CREATE INDEX IF NOT EXISTS sessions_expires_at_idx ON sessions(expires_at);`);
+  CREATE INDEX IF NOT EXISTS sessions_expires_at_idx ON sessions(expires_at);
+  CREATE TABLE IF NOT EXISTS room_members (
+    room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK (role IN ('host','cohost','member')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (room_id, user_id)
+  );
+  CREATE INDEX IF NOT EXISTS room_members_user_id_idx ON room_members(user_id);`);
 }
 
 function authCookie(sessionId: string) {
@@ -64,10 +73,10 @@ async function currentUser(req: express.Request) {
 function requireScrypt(password: string, salt: string) { return scryptSync(password, salt, 32).toString("hex"); }
 function verifyScrypt(password: string, stored: string) { const [salt, expectedHex] = stored.split(":"); if (!salt || !expectedHex) return false; const actual=Buffer.from(requireScrypt(password,salt),"hex"); const expected=Buffer.from(expectedHex,"hex"); return actual.length===expected.length && timingSafeEqual(actual,expected); }
 
-function issueRoomAccessToken(roomId: string, userId = ""): string | null {
+function issueRoomAccessToken(roomId: string, userId: string, role: RoomRole): string | null {
   if (!roomAccessSecret) return null;
   const expires = Math.floor(Date.now() / 1000) + roomAccessTtl;
-  const payload = Buffer.from(JSON.stringify({ roomId, userId, exp: expires })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({ roomId, userId, role, exp: expires })).toString("base64url");
   const signature = createHmac("sha256", roomAccessSecret).update(payload).digest("base64url");
   return payload + "." + signature;
 }
@@ -152,7 +161,7 @@ app.get("/api", (_req, res) => {
   res.json({ name: "языкOn", message: "Backend API is running" });
 });
 
-app.post("/api/rooms", (req, res) => {
+app.post("/api/rooms", async (req, res) => {
   const name =
     typeof req.body?.name === "string" && req.body.name.trim()
       ? req.body.name.trim().slice(0, 100)
@@ -169,11 +178,11 @@ app.post("/api/rooms", (req, res) => {
   const user = await currentUser(req);
   if (!user) { res.status(401).json({ error: "AUTH_REQUIRED" }); return; }
   const room = createRoom(name, password);
-  const accessToken = issueRoomAccessToken(room.id, user.id);
+  const accessToken = issueRoomAccessToken(room.id, user.id, "host");
   res.status(201).json({ ...room, accessToken });
 });
 
-app.post("/api/rooms/:id/access", (req, res) => {
+app.post("/api/rooms/:id/access", async (req, res) => {
   const room = getRoom(req.params.id);
   if (!room) { res.status(404).json({ error: "ROOM_NOT_FOUND" }); return; }
   if (!room.requiresPassword) {
