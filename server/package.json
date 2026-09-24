@@ -12,7 +12,8 @@
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "helmet": "^8.1.0",
-    "ws": "^8.18.3"
+    "ws": "^8.18.3",
+    "pg": "^8.16.3"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
@@ -20,6 +21,7 @@
     "@types/node": "^24.5.2",
     "@types/ws": "^8.18.1",
     "tsx": "^4.20.5",
-    "typescript": "^5.9.2"
+    "typescript": "^5.9.2",
+    "@types/pg": "^8.15.5"
   }
 }
