@@ -192,35 +192,58 @@ app.post("/api/rooms", async (req, res) => {
   res.status(500).json({ error: "ROOM_ID_GENERATION_FAILED" });
 });
 app.post("/api/rooms/:id/access", async (req, res) => {
-  const room = getRoom(req.params.id);
-  if (!room) { res.status(404).json({ error: "ROOM_NOT_FOUND" }); return; }
-  if (!room.requiresPassword) {
-    res.json({ accessToken: issueRoomAccessToken(room.id) });
-    return;
-  }
-  const password = typeof req.body?.password === "string" ? req.body.password : "";
-  if (!verifyRoomPassword(room.id, password)) {
-    res.status(401).json({ error: "INVALID_ROOM_PASSWORD" });
-    return;
-  }
+  if (!db) { res.status(503).json({ error: "DATABASE_NOT_CONFIGURED" }); return; }
+  if (!roomAccessSecret) { res.status(503).json({ error: "ROOM_ACCESS_NOT_CONFIGURED" }); return; }
   const user = await currentUser(req);
   if (!user) { res.status(401).json({ error: "AUTH_REQUIRED" }); return; }
-  const accessToken = issueRoomAccessToken(room.id, user.id);
-  if (!accessToken) { res.status(503).json({ error: "ROOM_ACCESS_NOT_CONFIGURED" }); return; }
-  res.json({ accessToken });
-});
 
-app.get("/api/rooms/:id", (req, res) => {
-  const room = getRoom(req.params.id);
+  const result = await db.query(
+    "SELECT id,name,owner_id,password_hash,password_salt,created_at FROM rooms WHERE id=$1",
+    [req.params.id.toUpperCase()]
+  );
+  const room = result.rows[0];
+  if (!room) { res.status(404).json({ error: "ROOM_NOT_FOUND" }); return; }
 
-  if (!room) {
-    res.status(404).json({ error: "ROOM_NOT_FOUND" });
-    return;
+  if (room.password_hash && room.password_salt) {
+    const password = typeof req.body?.password === "string" ? req.body.password : "";
+    const actual = Buffer.from(requireScrypt(password, room.password_salt), "hex");
+    const expected = Buffer.from(room.password_hash, "hex");
+    if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
+      res.status(401).json({ error: "INVALID_ROOM_PASSWORD" }); return;
+    }
   }
 
-  res.json(room);
+  const member = await db.query("SELECT role FROM room_members WHERE room_id=$1 AND user_id=$2", [room.id, user.id]);
+  let role: RoomRole = member.rows[0]?.role ?? (room.owner_id === user.id ? "host" : "member");
+  if (!member.rows[0]) {
+    await db.query("INSERT INTO room_members(room_id,user_id,role) VALUES($1,$2,$3)", [room.id, user.id, role]);
+  }
+  res.json({ accessToken: issueRoomAccessToken(room.id, user.id, role), role });
 });
 
+app.get("/api/rooms/:id", async (req, res) => {
+  if (!db) { res.status(503).json({ error: "DATABASE_NOT_CONFIGURED" }); return; }
+  const result = await db.query(
+    "SELECT id,name,password_hash,password_salt,created_at FROM rooms WHERE id=$1",
+    [req.params.id.toUpperCase()]
+  );
+  const room = result.rows[0];
+  if (!room) { res.status(404).json({ error: "ROOM_NOT_FOUND" }); return; }
+  res.json({
+    id: room.id,
+    name: room.name,
+    createdAt: new Date(room.created_at).toISOString(),
+    requiresPassword: Boolean(room.password_hash && room.password_salt)
+  });
+});
+
+app.get("/api/rooms/:id/membership", async (req, res) => {
+  if (!db) { res.status(503).json({ error: "DATABASE_NOT_CONFIGURED" }); return; }
+  const user = await currentUser(req);
+  if (!user) { res.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+  const result = await db.query("SELECT role FROM room_members WHERE room_id=$1 AND user_id=$2", [req.params.id.toUpperCase(), user.id]);
+  res.json({ member: Boolean(result.rows[0]), role: result.rows[0]?.role ?? null });
+});
 const server = createServer(app);
 attachSignaling(server);
 
