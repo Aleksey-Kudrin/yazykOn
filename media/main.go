@@ -543,12 +543,18 @@ func removePeer(p *Peer) {
 	}
 	remaining := make([]*Peer, 0, len(p.room.peers))
 	for _, other := range p.room.peers {
-		remaining = append(remaining, other)
+		if !other.waiting {
+			remaining = append(remaining, other)
+		}
 	}
 	newHost := ""
-	if p.room.hostID == p.id && len(remaining) > 0 {
-		newHost = remaining[0].id
-		p.room.hostID = newHost
+	if p.room.hostID == p.id {
+		if len(remaining) > 0 {
+			newHost = remaining[0].id
+			p.room.hostID = newHost
+		} else {
+			p.room.hostID = ""
+		}
 	}
 	empty := len(p.room.peers) == 0
 	p.room.mu.Unlock()
