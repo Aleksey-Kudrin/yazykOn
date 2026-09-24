@@ -40,6 +40,19 @@ export async function redisClearPresence(roomId: string, userId: string) {
   return true;
 }
 
+export async function redisGetPresence(roomId: string, userId: string) {
+  const redis = await getRedis();
+  if (!redis) return false;
+  return (await redis.exists(`yazykon:presence:${roomId}:${userId}`)) === 1;
+}
+
+export async function redisListPresence(roomId: string) {
+  const redis = await getRedis();
+  if (!redis) return [];
+  const keys = await redis.keys(`yazykon:presence:${roomId}:*`);
+  return keys.map(key => key.slice(`yazykon:presence:${roomId}:`.length));
+}
+
 export async function redisPublish(channel: string, payload: unknown) {
   const redis = await getRedis();
   if (!redis) return false;
