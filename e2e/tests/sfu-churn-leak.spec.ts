@@ -127,6 +127,7 @@ test("SFU repeated room churn leaves no Redis peer/session state", async () => {
     };
     const pass = cleanupMs.length === roomIds.length && Object.values(resourceChecks).every(Boolean);
     fs.writeFileSync(path.join(artifactDir, "sfu-churn-leak-report.json"), JSON.stringify({
+      generatedAt: new Date().toISOString(),
       rounds, rooms: roomIds.length, durationMs: Date.now() - started,
       cleanupMs, maxCleanupMs: Math.max(0, ...cleanupMs),
       budgets: { maxActivePeerDelta, maxRoomDelta, maxTrackDelta, maxResourceGrowth },
