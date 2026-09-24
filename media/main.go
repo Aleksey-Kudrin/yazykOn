@@ -36,6 +36,13 @@ type JoinData struct {
 	AccessToken string `json:"accessToken"`
 }
 
+type AccessClaims struct {
+	RoomID string `json:"roomId"`
+	UserID string `json:"userId"`
+	Role string `json:"role"`
+	Exp int64 `json:"exp"`
+}
+
 type ChatMessage struct {
 	Text string `json:"text"`
 }
@@ -47,6 +54,8 @@ type ModerationCommand struct {
 
 type Peer struct {
 	id        string
+	userID    string
+	role      string
 	room      *Room
 	conn      *websocket.Conn
 	pc        *webrtc.PeerConnection
@@ -118,20 +127,20 @@ func getRoom(id string) *Room {
 	return r
 }
 
-func verifyRoomAccessToken(roomID, token string) bool {
+func verifyRoomAccessToken(roomID, token string) (AccessClaims, bool) {
+  var claims AccessClaims
   secret := os.Getenv("ROOM_ACCESS_SECRET")
-  if secret == "" || token == "" { return secret == "" && token == "" }
+  if secret == "" || token == "" { return claims, secret == "" && token == "" }
   parts := strings.Split(token, ".")
-  if len(parts) != 2 { return false }
+  if len(parts) != 2 { return claims, false }
   mac := hmac.New(sha256.New, []byte(secret))
   _, _ = mac.Write([]byte(parts[0]))
   expected, err := base64.RawURLEncoding.DecodeString(parts[1])
-  if err != nil || !hmac.Equal(mac.Sum(nil), expected) { return false }
+  if err != nil || !hmac.Equal(mac.Sum(nil), expected) { return claims, false }
   payload, err := base64.RawURLEncoding.DecodeString(parts[0])
-  if err != nil { return false }
-  var claims struct { RoomID string `json:"roomId"`; Exp int64 `json:"exp"` }
-  if json.Unmarshal(payload, &claims) != nil || claims.RoomID != roomID || claims.Exp < time.Now().Unix() { return false }
-  return true
+  if err != nil || json.Unmarshal(payload, &claims) != nil { return claims, false }
+  if claims.RoomID != roomID || claims.UserID == "" || (claims.Role != "host" && claims.Role != "cohost" && claims.Role != "member") || claims.Exp < time.Now().Unix() { return claims, false }
+  return claims, true
 }
 
 func send(p *Peer, msg Signal) error {
@@ -173,7 +182,8 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		_ = conn.WriteJSON(Signal{Type: "error", Data: mustJSON(map[string]string{"code": "INVALID_JOIN"})})
 		return
 	}
-	if !verifyRoomAccessToken(first.RoomID, join.AccessToken) {
+	claims, accessOK := verifyRoomAccessToken(first.RoomID, join.AccessToken)
+	if !accessOK {
 		_ = conn.WriteJSON(Signal{Type: "error", Data: mustJSON(map[string]string{"code": "ROOM_ACCESS_DENIED"})})
 		return
 	}
@@ -191,21 +201,24 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 
 	room := getRoom(first.RoomID)
 	room.mu.Lock()
+	if room.hostID == "" && claims.Role == "host" {
+		room.hostID = id
+	}
 	if room.hostID == "" {
 		room.hostID = id
 	}
 	hostID := room.hostID
-	if room.locked && id != hostID {
+	if room.locked && id != hostID && claims.Role != "host" && claims.Role != "cohost" {
 		room.mu.Unlock()
 		_ = conn.WriteJSON(Signal{Type: "error", Data: mustJSON(map[string]string{"code": "ROOM_LOCKED"})})
 		_ = pc.Close()
 		return
 	}
 	room.mu.Unlock()
-	me := &Peer{id: id, room: room, conn: conn, pc: pc, published: make(map[string]*webrtc.TrackLocalStaticRTP), subscriptions: make(map[string]*webrtc.RTPSender)}
+	me := &Peer{id: id, userID: claims.UserID, role: claims.Role, room: room, conn: conn, pc: pc, published: make(map[string]*webrtc.TrackLocalStaticRTP), subscriptions: make(map[string]*webrtc.RTPSender)}
 
 	room.mu.Lock()
-	me.waiting = room.lobby && id != hostID
+	me.waiting = room.lobby && claims.Role != "host" && claims.Role != "cohost"
 	room.peers[id] = me
 	others := make([]*Peer, 0, len(room.peers)-1)
 	for pid, p := range room.peers {
@@ -363,7 +376,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		case "moderate":
 			var cmd ModerationCommand
 			if json.Unmarshal(msg.Data, &cmd) != nil || cmd.Action == "" { continue }
-			if me.id != roomHostID(room) {
+			if me.role != "host" && me.role != "cohost" {
 				_ = send(me, Signal{Type: "error", Data: mustJSON(map[string]string{"code": "MODERATION_DENIED"})})
 				continue
 			}
@@ -435,6 +448,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 			target := findPeer(room, cmd.PeerID)
 			if target != nil {
+				if target.role == "host" && me.role != "host" { _ = send(me, Signal{Type: "error", Data: mustJSON(map[string]string{"code": "MODERATION_DENIED"}) }); continue }
 				if cmd.Action == "mute" { _ = send(target, Signal{Type: "muted", Data: mustJSON(map[string]string{"by": me.id}) })
 				} else { _ = send(target, Signal{Type: "removed", Data: mustJSON(map[string]string{"reason": "removed_by_host"})}); removePeer(target) }
 			}
@@ -582,8 +596,10 @@ func removePeer(p *Peer) {
 	}
 	newHost := ""
 	if p.room.hostID == p.id {
-		if len(remaining) > 0 {
-			newHost = remaining[0].id
+		for _, candidate := range remaining { if candidate.role == "host" { newHost = candidate.id; break } }
+		if newHost == "" { for _, candidate := range remaining { if candidate.role == "cohost" { newHost = candidate.id; break } } }
+		if newHost == "" && len(remaining) > 0 { newHost = remaining[0].id }
+		if newHost != "" {
 			p.room.hostID = newHost
 		} else {
 			p.room.hostID = ""
