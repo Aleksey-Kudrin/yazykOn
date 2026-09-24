@@ -58,7 +58,6 @@ var (
 
 func newPeerConnection() (*webrtc.PeerConnection, error) {
 	settings := webrtc.SettingEngine{}
-	settings.SetICEMulticastDNSMode(webrtc.ICEMulticastDNSModeDisabled)
 	if err := settings.SetEphemeralUDPPortRange(mediaUDPMin, mediaUDPMax); err != nil {
 		return nil, err
 	}
@@ -175,7 +174,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 			var pkt rtp.Packet
 			if pktErr := pkt.Unmarshal(buf[:n]); pktErr == nil {
-				_, _ = local.WriteRTP(&pkt)
+				_ = local.WriteRTP(&pkt)
 			}
 		}
 
