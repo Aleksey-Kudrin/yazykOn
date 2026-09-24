@@ -29,7 +29,7 @@ const authRate = new Map<string, { count: number; resetAt: number }>();
 const roomRate = new Map<string, { count: number; resetAt: number }>();
 const breakoutManager = new BreakoutManager();
 const RATE_WINDOW_MS = 60_000;
-const AUDIT_RETENTION_DAYS = Math.max(1, Number(process.env.AUDIT_RETENTION_DAYS ?? 90) || 90);
+const AUDIT_RETENTION_DAYS = Math.max(1, Number(process.env.AUDIT_RETENTION_DAYS ?? 90) || 90);\nconst DB_POOL_MAX = Math.max(1, Number(process.env.DB_POOL_MAX ?? 20) || 20);\nconst DB_POOL_IDLE_TIMEOUT_MS = Math.max(1000, Number(process.env.DB_POOL_IDLE_TIMEOUT_MS ?? 30000) || 30000);\nconst DB_POOL_CONNECTION_TIMEOUT_MS = Math.max(1000, Number(process.env.DB_POOL_CONNECTION_TIMEOUT_MS ?? 5000) || 5000);
 
 function requestIp(req: express.Request) {
   return req.socket.remoteAddress ?? "unknown";
@@ -62,7 +62,7 @@ function isAllowedOrigin(origin: string | undefined) {
 function normalizeLoginUsername(value: unknown) {
   return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
-const db = databaseUrl ? new Pool({ connectionString: databaseUrl, max: Number(process.env.DB_POOL_MAX ?? 20), idleTimeoutMillis: Number(process.env.DB_POOL_IDLE_TIMEOUT_MS ?? 30000), connectionTimeoutMillis: Number(process.env.DB_POOL_CONNECTION_TIMEOUT_MS ?? 5000), maxUses: Number(process.env.DB_POOL_MAX_USES ?? 0) || undefined }) : null;
+const db = databaseUrl ? new Pool({ connectionString: databaseUrl, max: DB_POOL_MAX, idleTimeoutMillis: DB_POOL_IDLE_TIMEOUT_MS, connectionTimeoutMillis: DB_POOL_CONNECTION_TIMEOUT_MS, maxUses: Number(process.env.DB_POOL_MAX_USES ?? 0) || undefined }) : null;
 
 async function initDatabase() {
   if (!db) return;
