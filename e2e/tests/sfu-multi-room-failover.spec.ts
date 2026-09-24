@@ -277,8 +277,9 @@ test("multiple active rooms transfer ownership and reconnect on secondary", asyn
 
     // Reverse failover validates that the recovered media sessions are not
     // permanently pinned to the secondary node.
-    execFileSync("docker", ["compose", "-f", composeFile, "start", "sfu-primary"], { stdio: "inherit" });
+    execFileSync("docker", ["compose", "-f", composeFile, "start", "sfu-primary", "sfu-secondary"], { stdio: "inherit" });
     await waitHealth(primary);
+    await waitHealth(secondary);
     execFileSync("docker", ["compose", "-f", composeFile, "stop", "sfu-secondary"], { stdio: "inherit" });
     await new Promise(resolve => setTimeout(resolve, ttlMs + 1500));
 
