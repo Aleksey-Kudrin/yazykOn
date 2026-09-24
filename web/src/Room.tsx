@@ -7,6 +7,7 @@ type SignalMessage =
   | { type: "peer-left"; peerId: string }
   | { type: "track-published"; peerId: string; data?: { trackId?: string } }
   | { type: "track-removed"; peerId: string; data?: { trackId?: string } }
+  | { type: "chat"; peerId: string; data?: { text?: string; timestamp?: number } }
   | { type: "offer"; data: RTCSessionDescriptionInit }
   | { type: "answer"; data: RTCSessionDescriptionInit }
   | { type: "ice"; data: RTCIceCandidateInit }
@@ -40,6 +41,8 @@ export function Room({ roomId }: RoomProps) {
   const [participants, setParticipants] = React.useState<string[]>([]);
   const [sharing, setSharing] = React.useState(false);
   const screenTrack = React.useRef<MediaStreamTrack | null>(null);
+  const [chat, setChat] = React.useState<Array<{ peerId: string; text: string; timestamp: number }>>([]);
+  const [chatText, setChatText] = React.useState("");
 
   React.useEffect(() => {
     let stopped = false;
@@ -152,6 +155,11 @@ export function Room({ roomId }: RoomProps) {
             setStatus("Участник вышел");
             return;
           }
+          if (message.type === "chat") {
+            const text = message.data?.text;
+            if (text) setChat(current => [...current.slice(-99), { peerId: message.peerId, text, timestamp: message.data?.timestamp ?? Date.now() }]);
+            return;
+          }
           if (message.type === "answer") {
             await pc.setRemoteDescription(message.data);
             for (const candidate of pendingIce.current) await pc.addIceCandidate(candidate);
@@ -226,6 +234,19 @@ export function Room({ roomId }: RoomProps) {
     }
   }
 
+  function sendChat(event: React.FormEvent) {
+    event.preventDefault();
+    const text = chatText.trim();
+    const ws = socket.current;
+    if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+    if (Array.from(text).length > 2000) {
+      setStatus("Сообщение слишком длинное (максимум 2000 символов)");
+      return;
+    }
+    ws.send(JSON.stringify({ type: "chat", roomId, data: { text } }));
+    setChatText("");
+  }
+
   return <main className="meeting">
     <header className="meeting-header"><div className="logo">язык<span>On</span></div><div className="room-code">Комната: {roomId}</div><a href="/">Выйти</a></header>
     <section className="video-grid">
@@ -238,6 +259,17 @@ export function Room({ roomId }: RoomProps) {
       <strong>Участники ({participants.length})</strong>
       {participants.map(id => <div key={id} className="participant">{id === participants[0] ? "Вы" : "Участник"} <code>{id.slice(0, 8)}</code></div>)}
     </aside>
+    <section className="chat">
+      <strong>Чат</strong>
+      <div className="chat-messages">
+        {!chat.length && <span className="chat-empty">Сообщений пока нет</span>}
+        {chat.map((message, index) => <div key={message.timestamp + "-" + index} className="chat-message"><code>{message.peerId === participants[0] ? "Вы" : message.peerId.slice(0, 8)}</code><span>{message.text}</span></div>)}
+      </div>
+      <form onSubmit={sendChat}>
+        <input value={chatText} onChange={event => setChatText(event.target.value)} maxLength={2000} placeholder="Написать сообщение…" />
+        <button type="submit">Отправить</button>
+      </form>
+    </section>
     <nav className="controls"><button onClick={toggleMic}>{mic ? "🎙️ Микрофон" : "🔇 Микрофон"}</button><button onClick={toggleCamera}>{camera ? "📷 Камера" : "🚫 Камера"}</button><button onClick={toggleScreenShare}>{sharing ? "🛑 Остановить экран" : "🖥️ Экран"}</button><a className="leave" href="/">Завершить</a></nav>
   </main>;
 }
