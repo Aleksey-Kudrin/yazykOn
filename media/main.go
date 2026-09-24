@@ -394,7 +394,12 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 			if target.role != "host" { target.role = update.Role }
 			newRole := target.role
 			target.mu.Unlock()
-			_ = send(target, Signal{Type: "role-updated", Data: mustJSON(map[string]string{"userId": target.userID, "role": newRole})})
+			payload := mustJSON(map[string]string{"userId": target.userID, "role": newRole})
+			room.mu.RLock()
+			rolePeers := make([]*Peer, 0, len(room.peers))
+			for _, p := range room.peers { if !p.waiting { rolePeers = append(rolePeers, p) } }
+			room.mu.RUnlock()
+			for _, p := range rolePeers { _ = send(p, Signal{Type: "role-updated", PeerID: target.id, Data: payload}) }
 
 		case "moderate":
 			var cmd ModerationCommand
