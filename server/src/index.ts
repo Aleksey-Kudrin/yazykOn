@@ -5,7 +5,7 @@ import helmet from "helmet";
 import { createServer } from "node:http";
 import { Pool } from "pg";
 import { attachSignaling } from "./signaling.js";
-import { getRedis, redisEnabled } from "./redis.js";
+import { closeRedis, getRedis, redisEnabled } from "./redis.js";
 
 type RoomRole = "host" | "cohost" | "member";
 
@@ -428,3 +428,15 @@ initDatabase().then(() => {
     console.log(`языкOn signaling listening on ws://0.0.0.0:${port}/ws`);
   });
 });
+
+async function shutdown(signal: string) {
+  console.log(`языкOn server shutting down (${signal})`);
+  server.close(async () => {
+    await db?.end();
+    await closeRedis();
+    process.exit(0);
+  });
+  setTimeout(() => process.exit(1), 10_000).unref();
+}
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));
