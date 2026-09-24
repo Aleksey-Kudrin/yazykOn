@@ -231,3 +231,9 @@ button:disabled { opacity: .6; cursor: wait; }
 @media (max-width: 640px) {
   .chat form { flex-direction: column; }
 }
+
+.participant-controls { margin-top: 8px; display: flex; gap: 8px; }
+.lobby-waiting { margin-top: 10px; padding-top: 10px; border-top: 1px solid #1e293b; }
+.lobby-waiting > strong { display: block; margin-bottom: 6px; color: #fff; }
+.lobby-waiting .participant { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.participant button { margin-left: 4px; padding: 7px 10px; border-radius: 8px; }
