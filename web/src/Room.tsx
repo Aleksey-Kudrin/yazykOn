@@ -47,10 +47,18 @@ export function Room({ roomId }: RoomProps) {
         const stunUrl = import.meta.env.VITE_STUN_URL || "stun:stun.l.google.com:19302";
         iceServers.push({ urls: stunUrl });
         const turnUrl = import.meta.env.VITE_TURN_URL;
-        const turnUsername = import.meta.env.VITE_TURN_USERNAME;
-        const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL;
-        if (turnUrl && turnUsername && turnCredential) {
-          iceServers.push({ urls: turnUrl, username: turnUsername, credential: turnCredential });
+        if (turnUrl) {
+          try {
+            const response = await fetch("/api/turn-credentials");
+            if (response.ok) {
+              const turn = await response.json() as { enabled?: boolean; urls?: string; username?: string; credential?: string };
+              if (turn.enabled && turn.username && turn.credential) {
+                iceServers.push({ urls: turn.urls || turnUrl, username: turn.username, credential: turn.credential });
+              }
+            }
+          } catch (error) {
+            console.warn("TURN credentials unavailable", error);
+          }
         }
         const pc = new RTCPeerConnection({ iceServers });
         peer.current = pc;
