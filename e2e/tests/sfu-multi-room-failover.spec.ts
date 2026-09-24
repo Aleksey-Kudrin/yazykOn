@@ -1,5 +1,7 @@
 import { createHmac } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { test, expect } from "@playwright/test";
 
 const primary = process.env.SFU_PRIMARY_URL ?? "http://127.0.0.1:4100";
@@ -9,6 +11,7 @@ const redisUrl = process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
 const rooms = Math.min(6, Math.max(2, Number(process.env.SFU_ROOM_FAILOVER_ROOMS ?? 3)));
 const ttlMs = Number(process.env.SFU_ROOM_OWNER_TTL_MS ?? 3000);
 const secret = process.env.ROOM_ACCESS_SECRET ?? "integration-secret";
+const artifactDir = process.env.SFU_ARTIFACT_DIR ?? "artifacts";
 
 function token(roomId: string, userId: string) {
   const payload = Buffer.from(JSON.stringify({
@@ -93,6 +96,7 @@ test("multiple active rooms transfer Redis ownership after SFU loss", async ({ b
     expect(owner.value?.nodeId).toBe("integration-primary");
   }
 
+  const failoverStarted = Date.now();
   execFileSync("docker", ["compose", "-f", composeFile, "stop", "sfu-primary"], { stdio: "inherit" });
   await new Promise(resolve => setTimeout(resolve, ttlMs + 1500));
 
@@ -106,5 +110,9 @@ test("multiple active rooms transfer Redis ownership after SFU loss", async ({ b
   execFileSync("docker", ["compose", "-f", composeFile, "start", "sfu-primary"], { stdio: "inherit" });
   await waitHealth(primary);
 
+  const report = { rooms, roomIds, failoverMs: Date.now() - failoverStarted, owners: after, pass: after.every(owner => owner.value?.nodeId === "integration-secondary" && String(owner.value?.endpoint ?? "").includes("4200")) };
+  fs.mkdirSync(artifactDir, { recursive: true });
+  fs.writeFileSync(path.join(artifactDir, "sfu-multi-room-failover-report.json"), JSON.stringify(report, null, 2));
+  expect(report.pass).toBeTruthy();
   await Promise.all(pages.map(page => page.close()));
 });
