@@ -34,13 +34,14 @@ export function RecordingControl({ stream }: { stream: MediaStream | null }) {
 
 export function CaptionsControl({ stream }: { stream: MediaStream | null }) {
   const recognition = React.useRef<any>(null);
+  const enabledRef = React.useRef(false);
   const [enabled, setEnabled] = React.useState(false);
   const [caption, setCaption] = React.useState("");
 
   function toggle() {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) { setCaption("Распознавание речи не поддерживается этим браузером"); return; }
-    if (enabled) { recognition.current?.stop(); recognition.current = null; setEnabled(false); setCaption(""); return; }
+    if (enabledRef.current) { recognition.current?.stop(); recognition.current = null; enabledRef.current = false; setEnabled(false); setCaption(""); return; }
     const r = new SpeechRecognition();
     r.lang = "ru-RU"; r.continuous = true; r.interimResults = true;
     r.onresult = (event: any) => {
@@ -48,9 +49,9 @@ export function CaptionsControl({ stream }: { stream: MediaStream | null }) {
       for (let i = event.resultIndex; i < event.results.length; i++) text += event.results[i][0].transcript;
       setCaption(text.trim());
     };
-    r.onerror = () => { setEnabled(false); setCaption("Ошибка распознавания речи"); };
-    r.onend = () => { if (enabled) { try { r.start(); } catch {} } };
-    recognition.current = r; r.start(); setEnabled(true);
+    r.onerror = () => { enabledRef.current = false; setEnabled(false); setCaption("Ошибка распознавания речи"); };
+    r.onend = () => { if (enabledRef.current) { try { r.start(); } catch {} } };
+    recognition.current = r; enabledRef.current = true; r.start(); setEnabled(true);
   }
 
   return <span className="meeting-feature">
