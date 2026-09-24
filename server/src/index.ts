@@ -395,6 +395,21 @@ app.post("/api/rooms/:id/breakouts", async (req, res) => {
   res.status(201).json({ id: breakout.id, name: breakout.name, parentRoomId: roomId, participants: [] });
 });
 
+app.delete("/api/rooms/:id/breakouts/:breakoutId", async (req, res) => {
+  if (!db) { res.status(503).json({ error: "DATABASE_NOT_CONFIGURED" }); return; }
+  const user = await currentUser(req);
+  if (!user) { res.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+  const roomId = req.params.id.toUpperCase();
+  const owner = await db.query("SELECT owner_id FROM rooms WHERE id=$1", [roomId]);
+  if (!owner.rows[0]) { res.status(404).json({ error: "ROOM_NOT_FOUND" }); return; }
+  if (owner.rows[0].owner_id !== user.id) { res.status(403).json({ error: "OWNER_REQUIRED" }); return; }
+  if (!breakoutManager.delete(roomId, req.params.breakoutId.toUpperCase())) {
+    res.status(404).json({ error: "BREAKOUT_NOT_FOUND" });
+    return;
+  }
+  res.status(204).end();
+});
+
 app.get("/api/rooms/:id/breakouts", async (req, res) => {
   if (!db) { res.status(503).json({ error: "DATABASE_NOT_CONFIGURED" }); return; }
   const user = await currentUser(req);
