@@ -44,7 +44,7 @@ p { color: #94a3b8; font-size: 18px; }
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 32px 0;
+  margin: 32px 0 20px;
   color: #cbd5e1;
 }
 
@@ -57,10 +57,35 @@ p { color: #94a3b8; font-size: 18px; }
 
 .dot.online { background: #22c55e; }
 
+input {
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 14px 16px;
+  border: 1px solid #475569;
+  border-radius: 12px;
+  background: #0f172a;
+  color: #f8fafc;
+  font: inherit;
+}
+
 button {
   border: 0;
   border-radius: 12px;
-  padding: 12px 18px;
+  padding: 13px 18px;
   cursor: pointer;
   font: inherit;
 }
+
+button:disabled { opacity: .6; cursor: wait; }
+
+.room {
+  margin-top: 24px;
+  padding: 18px;
+  border-radius: 14px;
+  background: #0f172a;
+  color: #cbd5e1;
+}
+
+.room strong { display: block; color: #fff; margin-bottom: 8px; }
+.room code { color: #fff; }
+.room a { display: inline-block; margin-top: 12px; color: #93c5fd; }
