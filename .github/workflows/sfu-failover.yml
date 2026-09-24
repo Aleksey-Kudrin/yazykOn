@@ -52,6 +52,7 @@ jobs:
           SFU_SOAK_MAX_SAMPLE_ERROR_RATE: "0.01"
           SFU_SOAK_MAX_RESOURCE_GROWTH: "0.20"
           SFU_SOAK_CYCLE_MS: "10000"
+          SFU_SOAK_MAX_HEAP_BYTES: "0"
           SFU_REGRESSION_CYCLES: "4"
           SFU_REGRESSION_MAX_ACTIVE_DELTA: "1"
           SFU_REGRESSION_MAX_ROOM_DELTA: "0"
@@ -84,6 +85,8 @@ jobs:
           docker stats --no-stream > e2e/artifacts/docker-stats.txt || true
           test -f e2e/artifacts/sfu-chaos-regression-report.json || true
           test -f e2e/artifacts/sfu-long-soak-report.json || true
+          test -f e2e/artifacts/sfu-capacity-soak-report.json || true
+          test -f e2e/artifacts/sfu-failover-gate-report.json || true
       - name: Upload failover artifacts
         if: always()
         uses: actions/upload-artifact@v4
