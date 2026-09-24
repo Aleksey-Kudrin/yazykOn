@@ -64,10 +64,15 @@ function growth(before: number, after: number) {
 async function join(page: import("@playwright/test").Page, endpoint: string, roomId: string, peerId?: string): Promise<Connection> {
   return page.evaluate(async ({ endpoint, roomId, peerId, accessToken }) => {
     const registry = (globalThis as any).__sfuLongSoakConnections ??= new Map<string, any>();
+    const streams = (globalThis as any).__sfuLongSoakStreams ??= new Map<string, MediaStream>();
     const connectionId = crypto.randomUUID();
     const ws = new WebSocket(endpoint.replace(/^http/, "ws") + "/ws");
     const pc = new RTCPeerConnection();
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+    let stream = streams.get(roomId) as MediaStream | undefined;
+    if (!stream) {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+      streams.set(roomId, stream);
+    }
     for (const track of stream.getTracks()) pc.addTrack(track, stream);
 
     const joined = new Promise<any>((resolve, reject) => {
@@ -102,7 +107,6 @@ async function closeConnection(page: import("@playwright/test").Page, connection
     const registry = (globalThis as any).__sfuLongSoakConnections;
     const connection = registry?.get(id);
     if (!connection) return;
-    for (const track of connection.stream.getTracks()) track.stop();
     connection.ws.close();
     connection.pc.close();
     registry.delete(id);
@@ -210,6 +214,12 @@ test("SFU long soak keeps WebRTC recovery, health and runtime state bounded", as
     fatalError = String(error);
   } finally {
     await closeConnection(page, active?.connectionId).catch(() => {});
+    await page.evaluate((id) => {
+      const streams = (globalThis as any).__sfuLongSoakStreams;
+      const stream = streams?.get(id);
+      if (stream) for (const track of stream.getTracks()) track.stop();
+      streams?.delete(id);
+    }, roomId).catch(() => {});
     await restore();
     await sample();
   }
