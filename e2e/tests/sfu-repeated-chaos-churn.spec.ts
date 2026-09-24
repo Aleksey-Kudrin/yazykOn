@@ -141,6 +141,7 @@ test("repeated SFU failover churn preserves peer identity and cleans replaced tr
   try {
     for (let i = 0; i < members; i++) {
       const page = await browser.newPage({ permissions: ["camera", "microphone"] });
+      await page.goto(primary + "/health");
       pages.push(page);
       participants.push({
         page, userId: "repeat-user-" + i, peerId: "", trackIds: [] as string[], trackHistory: [] as string[][]
