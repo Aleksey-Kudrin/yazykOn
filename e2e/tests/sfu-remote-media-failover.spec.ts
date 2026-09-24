@@ -24,6 +24,7 @@ async function connect(page: import("@playwright/test").Page, endpoint: string, 
     (window as any).__remoteFailoverStream = stream;
 
     const pc = new RTCPeerConnection();
+    (window as any).__remoteFailoverConnections = ((window as any).__remoteFailoverConnections ?? 0) + 1;
     let remoteFrames = 0;
     const frameWaiters: Array<() => void> = [];
 
@@ -141,6 +142,11 @@ test("two participants recover remote media after SFU failover", async ({ browse
   expect(recovered[1].remotePeers).toContain(first.peerId);
 
   await Promise.all(recovered.map((_, index) => waitForFrame(pages[index])));
+
+  const recoveryConnections = await Promise.all(pages.map(page => page.evaluate(() => ({
+    connections: (window as any).__remoteFailoverConnections ?? 0
+  }))));
+  expect(recoveryConnections.every(state => state.connections >= 1)).toBeTruthy();
 
   const mediaState = await Promise.all(pages.map(page => page.evaluate(() =>
     [...document.querySelectorAll("video")].map(video => ({
