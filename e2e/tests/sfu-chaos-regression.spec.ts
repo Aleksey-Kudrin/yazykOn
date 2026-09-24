@@ -11,6 +11,8 @@ const secret = process.env.ROOM_ACCESS_SECRET ?? "integration-secret";
 const rounds = Math.max(3, Number(process.env.SFU_REGRESSION_CYCLES ?? 4));
 const slaMs = Number(process.env.SFU_FAILOVER_SLA_MS ?? 30000);
 const maxActiveDelta = Number(process.env.SFU_REGRESSION_MAX_ACTIVE_DELTA ?? 1);
+const maxRoomDelta = Number(process.env.SFU_REGRESSION_MAX_ROOM_DELTA ?? 0);
+const maxTrackDelta = Number(process.env.SFU_REGRESSION_MAX_TRACK_DELTA ?? 0);
 const maxResourceGrowth = Number(process.env.SFU_REGRESSION_MAX_RESOURCE_GROWTH ?? 0.2);
 const artifactDir = process.env.SFU_ARTIFACT_DIR ?? "artifacts";
 
@@ -192,6 +194,8 @@ test("SFU chaos regression keeps recovery latency and resource state bounded", a
     });
 
     const activePeerDelta = resourceDelta.map(s => s.yazykon_media_active_peers?.delta ?? 0);
+    const activeRoomDelta = resourceDelta.map(s => s.yazykon_media_active_rooms?.delta ?? 0);
+    const activeTrackDelta = resourceDelta.map(s => s.yazykon_media_active_tracks?.delta ?? 0);
     const boundedResourceGrowth = resourceDelta.flatMap(snapshot =>
       Object.entries(snapshot)
         .filter(([name, value]) =>
@@ -210,8 +214,12 @@ test("SFU chaos regression keeps recovery latency and resource state bounded", a
       resources: { before: resourceBefore, after: resourceAfter, delta: resourceDelta },
       budgets: {
         maxActivePeerDelta,
+        maxRoomDelta,
+        maxTrackDelta,
         maxResourceGrowth,
-        activePeerDelta: activePeerDelta,
+        activePeerDelta,
+        activeRoomDelta,
+        activeTrackDelta,
         resourceGrowth: boundedResourceGrowth
       },
       pass:
@@ -219,6 +227,8 @@ test("SFU chaos regression keeps recovery latency and resource state bounded", a
         latency.p99 <= slaMs &&
         latency.max <= slaMs &&
         activePeerDelta.every(delta => delta <= maxActiveDelta) &&
+        activeRoomDelta.every(delta => delta <= maxRoomDelta) &&
+        activeTrackDelta.every(delta => delta <= maxTrackDelta) &&
         boundedResourceGrowth.every(item => item.growth <= maxResourceGrowth)
     };
 
@@ -232,6 +242,8 @@ test("SFU chaos regression keeps recovery latency and resource state bounded", a
     expect(latency.p99).toBeLessThanOrEqual(slaMs);
     expect(latency.max).toBeLessThanOrEqual(slaMs);
     for (const delta of activePeerDelta) expect(delta).toBeLessThanOrEqual(maxActiveDelta);
+    for (const delta of activeRoomDelta) expect(delta).toBeLessThanOrEqual(maxRoomDelta);
+    for (const delta of activeTrackDelta) expect(delta).toBeLessThanOrEqual(maxTrackDelta);
     for (const item of boundedResourceGrowth) expect(item.growth).toBeLessThanOrEqual(maxResourceGrowth);
   } finally {
     if (active) await closeConnection(page, active.connectionId).catch(() => {});
