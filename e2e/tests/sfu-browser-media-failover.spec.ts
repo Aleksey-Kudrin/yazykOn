@@ -75,15 +75,22 @@ test("browser WebRTC media survives SFU A loss and republishes on SFU B", async 
       });
 
       const nextMessage = (type: string) => new Promise<any>((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error("Timed out waiting for " + type)), 10000);
-        messageWaiters.push(message => {
+        const timer = setTimeout(() => reject(new Error("Timed out waiting for " + type)), 10000);
+        const take = (message: any) => {
           if (message.type === type) {
-            clearTimeout(timeout);
+            clearTimeout(timer);
             resolve(message);
           } else {
-            messageWaiters.push(arguments.callee as never);
+            messageWaiters.push(take);
           }
-        });
+        };
+        const queued = messages.find(message => message.type === type);
+        if (queued) {
+          clearTimeout(timer);
+          resolve(queued);
+        } else {
+          messageWaiters.push(take);
+        }
       });
 
       const candidates: RTCIceCandidateInit[] = [];
