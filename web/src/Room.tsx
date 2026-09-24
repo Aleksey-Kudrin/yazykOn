@@ -323,7 +323,7 @@ export function Room({ roomId }: RoomProps) {
 
   async function refreshMembers() { try { setMembers(await getRoomMembers(roomId)); } catch { setMembers([]); } }
 
-  async function changeMemberRole(userId: string, role: "cohost" | "member") { try { await setRoomMemberRole(roomId, userId, role); await refreshMembers(); if (socket.current?.readyState === WebSocket.OPEN) socket.current.send(JSON.stringify({ type: "role-update", roomId, data: JSON.stringify({ userId, role }) })); setStatus("Роль участника изменена"); } catch { setStatus("Не удалось изменить роль"); } }
+  async function changeMemberRole(userId: string, role: "cohost" | "member") { try { await setRoomMemberRole(roomId, userId, role); await refreshMembers(); setStatus("Роль участника изменена"); } catch { setStatus("Не удалось изменить роль"); } }
 
   function muteParticipant(peerId: string) {
     const ws = socket.current;
