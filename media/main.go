@@ -32,6 +32,8 @@ type Peer struct {
 	pc        *webrtc.PeerConnection
 	mu        sync.Mutex
 	closed    bool
+	negotiating bool
+	negotiationPending bool
 	published map[string]*webrtc.TrackLocalStaticRTP
 }
 
@@ -53,6 +55,16 @@ var (
 	roomsMu  sync.Mutex
 	rooms    = map[string]*Room{}
 )
+
+func newPeerConnection() (*webrtc.PeerConnection, error) {
+	settings := webrtc.SettingEngine{}
+	settings.SetICEMulticastDNSMode(webrtc.ICEMulticastDNSModeDisabled)
+	if err := settings.SetEphemeralUDPPortRange(mediaUDPMin, mediaUDPMax); err != nil {
+		return nil, err
+	}
+	api := webrtc.NewAPI(webrtc.WithSettingEngine(settings))
+	return api.NewPeerConnection(webrtc.Configuration{})
+}
 
 func getRoom(id string) *Room {
 	roomsMu.Lock()
@@ -77,20 +89,11 @@ func send(p *Peer, msg Signal) error {
 func main() {
 	http.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"ok":true,"service":"yazykOn-sfu","version":"0.4.0","mediaUdpRange":"50000-50100"}`))
+		_, _ = w.Write([]byte(`{"ok":true,"service":"yazykOn-sfu","version":"0.5.0","mediaUdpRange":"50000-50100"}`))
 	})
 	http.HandleFunc("/ws", handleWS)
 
-	settings := webrtc.SettingEngine{}
-	settings.SetICEMulticastDNSMode(webrtc.ICEMulticastDNSModeDisabled)
-	if err := settings.SetEphemeralUDPPortRange(mediaUDPMin, mediaUDPMax); err != nil {
-		log.Fatalf("configure media UDP range: %v", err)
-	}
-
-	api := webrtc.NewAPI(webrtc.WithSettingEngine(settings))
 	log.Println("языкOn custom SFU listening on :4000, media UDP :50000-50100")
-
-	_ = api
 	log.Fatal(http.ListenAndServe(":4000", nil))
 }
 
@@ -112,14 +115,9 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		id = newID()
 	}
 
-	settings := webrtc.SettingEngine{}
-	settings.SetICEMulticastDNSMode(webrtc.ICEMulticastDNSModeDisabled)
-	if err := settings.SetEphemeralUDPPortRange(mediaUDPMin, mediaUDPMax); err != nil {
-		_ = conn.WriteJSON(Signal{Type: "error", Data: json.RawMessage(`{"code":"MEDIA_PORT_CONFIG"}`)})
-		return
-	}
-	pc, err := webrtc.NewAPI(webrtc.WithSettingEngine(settings)).NewPeerConnection(webrtc.Configuration{})
+	pc, err := newPeerConnection()
 	if err != nil {
+		_ = conn.WriteJSON(Signal{Type: "error", Data: json.RawMessage(`{"code":"MEDIA_PORT_CONFIG"}`)})
 		return
 	}
 
@@ -234,8 +232,11 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 				}
 				b, _ := json.Marshal(pc.LocalDescription())
 				_ = send(me, Signal{Type: "answer", Data: b})
+				negotiationFinished(me)
 			} else {
-				_ = pc.SetRemoteDescription(desc)
+				if pc.SetRemoteDescription(desc) == nil {
+					negotiationFinished(me)
+				}
 			}
 		case "ice":
 			var candidate webrtc.ICECandidateInit
@@ -261,22 +262,48 @@ func othersSnapshot(room *Room, self string) []*Peer {
 
 func renegotiate(p *Peer) {
 	p.mu.Lock()
-	closed := p.closed
-	p.mu.Unlock()
-	if closed {
+	if p.closed {
+		p.mu.Unlock()
 		return
 	}
+	if p.negotiating {
+		p.negotiationPending = true
+		p.mu.Unlock()
+		return
+	}
+	p.negotiating = true
+	p.mu.Unlock()
+
 	go func() {
 		offer, err := p.pc.CreateOffer(nil)
 		if err != nil {
+			negotiationFinished(p)
 			return
 		}
 		if err = p.pc.SetLocalDescription(offer); err != nil {
+			negotiationFinished(p)
 			return
 		}
-		b, _ := json.Marshal(p.pc.LocalDescription())
-		_ = send(p, Signal{Type: "offer", Data: b})
+		b, err := json.Marshal(p.pc.LocalDescription())
+		if err != nil {
+			negotiationFinished(p)
+			return
+		}
+		if err = send(p, Signal{Type: "offer", Data: b}); err != nil {
+			negotiationFinished(p)
+		}
 	}()
+}
+
+func negotiationFinished(p *Peer) {
+	p.mu.Lock()
+	p.negotiating = false
+	pending := p.negotiationPending && !p.closed
+	p.negotiationPending = false
+	p.mu.Unlock()
+	if pending {
+		renegotiate(p)
+	}
 }
 
 func removePeer(p *Peer) {
@@ -286,6 +313,8 @@ func removePeer(p *Peer) {
 		return
 	}
 	p.closed = true
+	p.negotiating = false
+	p.negotiationPending = false
 	p.mu.Unlock()
 	if p.room == nil {
 		return
