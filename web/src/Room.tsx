@@ -5,26 +5,23 @@ interface RoomProps {
 }
 
 type SignalMessage =
-  | { type: "joined"; roomId: string; peerId: string; peers: string[] }
+  | { type: "joined"; roomId: string; peerId: string; data?: { peers: string[] } }
   | { type: "peer-joined"; peerId: string }
   | { type: "peer-left"; peerId: string }
-  | { type: "offer"; peerId: string; data: RTCSessionDescriptionInit }
-  | { type: "answer"; peerId: string; data: RTCSessionDescriptionInit }
-  | { type: "ice"; peerId: string; data: RTCIceCandidateInit }
-  | { type: "error"; error: string };
+  | { type: "offer"; data: RTCSessionDescriptionInit }
+  | { type: "answer"; data: RTCSessionDescriptionInit }
+  | { type: "ice"; data: RTCIceCandidateInit }
+  | { type: "error"; error?: string; data?: { code?: string } };
 
-const RTC_CONFIG: RTCConfiguration = {
-  iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
-};
-
-function getWebSocketUrl() {
-  const api = import.meta.env.VITE_API_URL;
-  if (api) {
-    const url = new URL(api);
+function mediaUrl() {
+  const configured = import.meta.env.VITE_MEDIA_URL;
+  if (configured) {
+    const url = new URL(configured);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
     return `${url.origin}/ws`;
   }
-  return `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws`;
+
+  return `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.hostname}:4000/ws`;
 }
 
 export function Room({ roomId }: RoomProps) {
@@ -39,70 +36,6 @@ export function Room({ roomId }: RoomProps) {
   const [connected, setConnected] = React.useState(false);
   const [mic, setMic] = React.useState(true);
   const [camera, setCamera] = React.useState(true);
-
-  const send = React.useCallback((message: object) => {
-    if (socket.current?.readyState === WebSocket.OPEN) {
-      socket.current.send(JSON.stringify(message));
-    }
-  }, []);
-
-  const createPeer = React.useCallback((targetPeerId: string) => {
-    if (peer.current) return peer.current;
-
-    const pc = new RTCPeerConnection(RTC_CONFIG);
-
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        send({
-          type: "ice",
-          roomId,
-          peerId: targetPeerId,
-          data: event.candidate.toJSON()
-        });
-      }
-    };
-
-    pc.ontrack = (event) => {
-      const [stream] = event.streams;
-      if (stream && remoteVideo.current) {
-        remoteVideo.current.srcObject = stream;
-      }
-    };
-
-    pc.onconnectionstatechange = () => {
-      if (pc.connectionState === "connected") {
-        setConnected(true);
-        setStatus("Соединение установлено");
-      } else if (pc.connectionState === "failed") {
-        setConnected(false);
-        setStatus("WebRTC: соединение не установлено");
-      } else {
-        setStatus(`WebRTC: ${pc.connectionState}`);
-      }
-    };
-
-    if (localStream.current) {
-      for (const track of localStream.current.getTracks()) {
-        pc.addTrack(track, localStream.current);
-      }
-    }
-
-    peer.current = pc;
-    return pc;
-  }, [roomId, send]);
-
-  const makeOffer = React.useCallback(async (targetPeerId: string) => {
-    const pc = createPeer(targetPeerId);
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-
-    send({
-      type: "offer",
-      roomId,
-      peerId: targetPeerId,
-      data: pc.localDescription
-    });
-  }, [createPeer, roomId, send]);
 
   React.useEffect(() => {
     let stopped = false;
@@ -122,57 +55,81 @@ export function Room({ roomId }: RoomProps) {
         localStream.current = stream;
         if (localVideo.current) localVideo.current.srcObject = stream;
 
-        const ws = new WebSocket(getWebSocketUrl());
+        const pc = new RTCPeerConnection({
+          iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+        });
+        peer.current = pc;
+
+        for (const track of stream.getTracks()) {
+          pc.addTrack(track, stream);
+        }
+
+        pc.ontrack = (event) => {
+          const [remoteStream] = event.streams;
+          if (remoteStream && remoteVideo.current) {
+            remoteVideo.current.srcObject = remoteStream;
+          }
+        };
+
+        pc.onconnectionstatechange = () => {
+          if (pc.connectionState === "connected") {
+            setConnected(true);
+            setStatus("Соединение установлено");
+          } else if (pc.connectionState === "failed") {
+            setConnected(false);
+            setStatus("WebRTC: соединение не установлено");
+          } else {
+            setStatus(`WebRTC: ${pc.connectionState}`);
+          }
+        };
+
+        const ws = new WebSocket(mediaUrl());
         socket.current = ws;
 
-        ws.onopen = () => {
-          setStatus("Сигнальный сервер подключён");
-          send({ type: "join", roomId });
+        ws.onopen = async () => {
+          setStatus("Подключено к языкуOn SFU");
+          ws.send(JSON.stringify({ type: "join", roomId }));
+
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+
+          ws.send(JSON.stringify({
+            type: "offer",
+            roomId,
+            data: pc.localDescription
+          }));
+        };
+
+        pc.onicecandidate = (event) => {
+          if (event.candidate && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              type: "ice",
+              roomId,
+              data: event.candidate.toJSON()
+            }));
+          }
         };
 
         ws.onmessage = async (event) => {
           const message = JSON.parse(event.data) as SignalMessage;
 
           if (message.type === "joined") {
-            if (message.peers.length === 0) {
-              setStatus("Вы в комнате. Ожидание участника…");
-            } else {
-              await makeOffer(message.peers[0]);
-            }
+            setStatus("Комната подключена");
             return;
           }
 
           if (message.type === "peer-joined") {
-            setStatus("Участник подключился. Ожидание WebRTC…");
+            setStatus("Новый участник подключился");
             return;
           }
 
-          if (message.type === "offer") {
-            const pc = createPeer(message.peerId);
-            await pc.setRemoteDescription(message.data);
-
-            for (const candidate of pendingIce.current) {
-              await pc.addIceCandidate(candidate);
-            }
-            pendingIce.current = [];
-
-            const answer = await pc.createAnswer();
-            await pc.setLocalDescription(answer);
-
-            send({
-              type: "answer",
-              roomId,
-              peerId: message.peerId,
-              data: pc.localDescription
-            });
+          if (message.type === "peer-left") {
+            setStatus("Участник вышел");
             return;
           }
 
           if (message.type === "answer") {
-            const pc = peer.current;
-            if (!pc) return;
             await pc.setRemoteDescription(message.data);
-
             for (const candidate of pendingIce.current) {
               await pc.addIceCandidate(candidate);
             }
@@ -180,9 +137,21 @@ export function Room({ roomId }: RoomProps) {
             return;
           }
 
+          if (message.type === "offer") {
+            await pc.setRemoteDescription(message.data);
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+
+            ws.send(JSON.stringify({
+              type: "answer",
+              roomId,
+              data: pc.localDescription
+            }));
+            return;
+          }
+
           if (message.type === "ice") {
-            const pc = peer.current;
-            if (!pc || !pc.remoteDescription) {
+            if (!pc.remoteDescription) {
               pendingIce.current.push(message.data);
             } else {
               await pc.addIceCandidate(message.data);
@@ -190,24 +159,14 @@ export function Room({ roomId }: RoomProps) {
             return;
           }
 
-          if (message.type === "peer-left") {
-            peer.current?.close();
-            peer.current = null;
-            pendingIce.current = [];
-            if (remoteVideo.current) remoteVideo.current.srcObject = null;
-            setConnected(false);
-            setStatus("Участник вышел. Ожидание…");
-            return;
-          }
-
           if (message.type === "error") {
-            setStatus(`Ошибка: ${message.error}`);
+            setStatus(`Ошибка SFU: ${message.error ?? message.data?.code ?? "UNKNOWN"}`);
           }
         };
 
-        ws.onerror = () => setStatus("Ошибка WebSocket");
+        ws.onerror = () => setStatus("Ошибка соединения с SFU");
         ws.onclose = () => {
-          if (!stopped) setStatus("Сигнальный сервер отключён");
+          if (!stopped) setStatus("SFU отключён");
         };
       } catch (error) {
         console.error(error);
@@ -223,7 +182,7 @@ export function Room({ roomId }: RoomProps) {
       peer.current?.close();
       localStream.current?.getTracks().forEach((track) => track.stop());
     };
-  }, [makeOffer, roomId, send]);
+  }, [roomId]);
 
   function toggleMic() {
     const next = !mic;
@@ -256,7 +215,7 @@ export function Room({ roomId }: RoomProps) {
         </div>
         <div className="video-tile remote">
           <video ref={remoteVideo} autoPlay playsInline />
-          <span>{connected ? "Участник" : "Ожидание участника"}</span>
+          <span>{connected ? "Участники" : "Ожидание участников"}</span>
         </div>
       </section>
 
