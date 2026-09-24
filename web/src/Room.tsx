@@ -81,19 +81,19 @@ export function Room({ roomId }: RoomProps) {
     let stopped = false;
     async function start() {
       try {
-        const room = await getRoom(sfuRoomId);
+        const room = await getRoom(roomId);
         try { setChat(await getRoomMessages(roomId)); } catch (error) { console.warn("chat history unavailable", error); }
         let accessToken = sfuAccessToken ?? sessionStorage.getItem("yazykon-access-" + sfuRoomId);
         if (sfuRoomId !== roomId && !accessToken) {
           setStatus("Нет токена breakout-комнаты");
           return;
         }
-        if (room.requiresPassword && !accessToken) {
+        if (sfuRoomId === roomId && room.requiresPassword && !accessToken) {
           const password = window.prompt("Введите пароль комнаты");
           if (password === null) { setStatus("Вход отменён"); return; }
           const access = await accessRoom(roomId, password);
           accessToken = access.accessToken;
-        } else if (!room.requiresPassword && !accessToken) {
+        } else if (sfuRoomId === roomId && !room.requiresPassword && !accessToken) {
           const access = await accessRoom(roomId);
           accessToken = access.accessToken;
         }
