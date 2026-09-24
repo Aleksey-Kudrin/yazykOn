@@ -177,11 +177,31 @@ func TestReplacePeerSessionPreservesPeerSlotAndHost(t *testing.T) {
 
 
 func TestClusterTrackStateJSONRoundTrip(t *testing.T) {
-	state := clusterTrackState{PeerID: "peer-1", TrackID: "video-1", Kind: "video", UpdatedAt: time.Now().Unix()}
+	state := clusterTrackState{PeerID: "peer-1", TrackID: "video-1", SessionID: "session-1", Kind: "video", UpdatedAt: time.Now().Unix()}
 	raw := mustJSON(state)
 	var got clusterTrackState
 	if err := json.Unmarshal(raw, &got); err != nil { t.Fatal(err) }
-	if got.PeerID != state.PeerID || got.TrackID != state.TrackID || got.Kind != state.Kind {
+	if got.PeerID != state.PeerID || got.TrackID != state.TrackID || got.SessionID != state.SessionID || got.Kind != state.Kind {
 		t.Fatalf("track state mismatch: got %+v want %+v", got, state)
+	}
+}
+
+
+func TestSFURoomOwnerSettingsAreBounded(t *testing.T) {
+	t.Setenv("SFU_ROOM_OWNER_TTL", "2500ms")
+	if got := sfuRoomOwnerTTL(); got != 2500*time.Millisecond {
+		t.Fatalf("ttl = %v, want 2.5s", got)
+	}
+	t.Setenv("SFU_ROOM_OWNER_TTL", "100ms")
+	if got := sfuRoomOwnerTTL(); got != 45*time.Second {
+		t.Fatalf("too-short ttl = %v, want default", got)
+	}
+	t.Setenv("SFU_CLUSTER_HEARTBEAT", "750ms")
+	if got := sfuClusterHeartbeat(); got != 750*time.Millisecond {
+		t.Fatalf("heartbeat = %v, want 750ms", got)
+	}
+	t.Setenv("SFU_CLUSTER_HEARTBEAT", "100ms")
+	if got := sfuClusterHeartbeat(); got != 10*time.Second {
+		t.Fatalf("too-short heartbeat = %v, want default", got)
 	}
 }
