@@ -103,6 +103,7 @@ var (
 	clusterRedis *redis.Client
 	clusterNodeID string
 	clusterReady atomic.Bool
+	clusterLastSync atomic.Int64
 	mediaConnMu sync.Mutex
 	mediaConnByIP = map[string]int{}
 	activePeers atomic.Int64
@@ -365,6 +366,7 @@ func clusterInit() func() {
 	clusterNodeID = nodeID
 	clusterMu.Unlock()
 	clusterReady.Store(true)
+	clusterLastSync.Store(time.Now().UnixNano())
 
 	go func() {
 		ticker := time.NewTicker(sfuClusterHeartbeat())
@@ -604,7 +606,9 @@ func main() {
 		clusterMu.RLock()
 		nodeID := clusterNodeID
 		clusterMu.RUnlock()
-		payload := map[string]any{"ok": true, "service": "yazykOn-sfu", "version": "0.6.0", "mediaUdpRange": "50000-50100", "nodeId": nodeID, "cluster": clusterReady.Load()}
+		lastSync := clusterLastSync.Load()
+		clusterHealthy := clusterReady.Load() && lastSync > 0 && time.Since(time.Unix(0, lastSync)) <= 3*sfuClusterHeartbeat()
+		payload := map[string]any{"ok": true, "service": "yazykOn-sfu", "version": "0.6.0", "mediaUdpRange": "50000-50100", "nodeId": nodeID, "cluster": clusterHealthy}
 		_ = json.NewEncoder(w).Encode(payload)
 	})
 	http.HandleFunc("/ws", handleWS)
