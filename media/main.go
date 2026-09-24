@@ -265,6 +265,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 	room.mu.RUnlock()
 	if isWaiting {
 		_ = send(me, Signal{Type: "lobby-waiting", RoomID: room.id, PeerID: id})
+		if host := findPeer(room, hostID); host != nil { _ = send(host, Signal{Type: "lobby-join", PeerID: id}) }
 	} else {
 		b, _ := json.Marshal(map[string]any{"peers": peerIDs(others), "tracks": len(tracks), "hostId": hostID, "locked": locked, "lobby": lobby})
 		_ = send(me, Signal{Type: "joined", RoomID: room.id, PeerID: id, Data: b})
