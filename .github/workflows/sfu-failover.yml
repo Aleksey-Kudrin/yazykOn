@@ -26,10 +26,12 @@ jobs:
       - name: Wait for SFUs
         run: |
           for url in http://127.0.0.1:4100/health http://127.0.0.1:4200/health; do
+            ready=0
             for i in $(seq 1 60); do
-              curl -fsS "$url" >/dev/null && break
+              if curl -fsS "$url" >/dev/null; then ready=1; break; fi
               sleep 1
             done
+            test "$ready" -eq 1
           done
       - name: Run failover probe
         env:
@@ -40,7 +42,7 @@ jobs:
           REDIS_URL: redis://127.0.0.1:6379
           SFU_PRIMARY_URL: http://127.0.0.1:4100
           SFU_SECONDARY_URL: http://127.0.0.1:4200
-        run: npx playwright test tests/sfu-failover.spec.ts tests/sfu-browser-media-failover.spec.ts
+        run: npx playwright test tests/sfu-failover.spec.ts tests/sfu-room-ownership.spec.ts tests/sfu-browser-media-failover.spec.ts
       - name: Cleanup
         if: always()
         working-directory: .
