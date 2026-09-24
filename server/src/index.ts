@@ -1,6 +1,7 @@
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";
+import { createRoom, getRoom } from "./rooms.js";
 
 const app = express();
 const port = Number(process.env.PORT ?? 3000);
@@ -23,6 +24,26 @@ app.get("/api", (_req, res) => {
     name: "языкOn",
     message: "Backend API is running"
   });
+});
+
+app.post("/api/rooms", (req, res) => {
+  const name =
+    typeof req.body?.name === "string" && req.body.name.trim()
+      ? req.body.name.trim().slice(0, 100)
+      : "Новая конференция";
+
+  res.status(201).json(createRoom(name));
+});
+
+app.get("/api/rooms/:id", (req, res) => {
+  const room = getRoom(req.params.id);
+
+  if (!room) {
+    res.status(404).json({ error: "ROOM_NOT_FOUND" });
+    return;
+  }
+
+  res.json(room);
 });
 
 app.listen(port, "0.0.0.0", () => {
