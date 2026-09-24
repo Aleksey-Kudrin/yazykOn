@@ -29,7 +29,10 @@ const authRate = new Map<string, { count: number; resetAt: number }>();
 const roomRate = new Map<string, { count: number; resetAt: number }>();
 const breakoutManager = new BreakoutManager();
 const RATE_WINDOW_MS = 60_000;
-const AUDIT_RETENTION_DAYS = Math.max(1, Number(process.env.AUDIT_RETENTION_DAYS ?? 90) || 90);\nconst DB_POOL_MAX = Math.max(1, Number(process.env.DB_POOL_MAX ?? 20) || 20);\nconst DB_POOL_IDLE_TIMEOUT_MS = Math.max(1000, Number(process.env.DB_POOL_IDLE_TIMEOUT_MS ?? 30000) || 30000);\nconst DB_POOL_CONNECTION_TIMEOUT_MS = Math.max(1000, Number(process.env.DB_POOL_CONNECTION_TIMEOUT_MS ?? 5000) || 5000);
+const AUDIT_RETENTION_DAYS = Math.max(1, Number(process.env.AUDIT_RETENTION_DAYS ?? 90) || 90);
+const DB_POOL_MAX = Math.max(1, Number(process.env.DB_POOL_MAX ?? 20) || 20);
+const DB_POOL_IDLE_TIMEOUT_MS = Math.max(1000, Number(process.env.DB_POOL_IDLE_TIMEOUT_MS ?? 30000) || 30000);
+const DB_POOL_CONNECTION_TIMEOUT_MS = Math.max(1000, Number(process.env.DB_POOL_CONNECTION_TIMEOUT_MS ?? 5000) || 5000);
 
 function requestIp(req: express.Request) {
   return req.socket.remoteAddress ?? "unknown";
