@@ -2,6 +2,7 @@ import { createClient, type RedisClientType } from "redis";
 
 let client: RedisClientType | null = null;
 let connectPromise: Promise<RedisClientType | null> | null = null;
+let subscriberClients: RedisClientType[] = [];
 
 export function redisEnabled() {
   return Boolean(process.env.REDIS_URL);
@@ -57,6 +58,7 @@ export async function redisSubscribe(channel: string, handler: (payload: unknown
   const redis = await getRedis();
   if (!redis) return false;
   const subscriber = redis.duplicate();
+  subscriberClients.push(subscriber);
   subscriber.on("error", error => console.error("Redis subscriber error", error));
   await subscriber.connect();
   await subscriber.subscribe(channel, raw => {
@@ -74,5 +76,7 @@ export async function redisPublish(channel: string, payload: unknown) {
 
 export async function closeRedis() {
   if (client?.isOpen) await client.quit();
+  for (const subscriber of subscriberClients) { if (subscriber.isOpen) await subscriber.quit(); }
+  subscriberClients = [];
   client = null;
 }
