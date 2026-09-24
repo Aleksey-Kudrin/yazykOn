@@ -65,6 +65,7 @@ export function Room({ roomId }: RoomProps) {
   const [waitingPeers, setWaitingPeers] = React.useState<string[]>([]);
   const [hostId, setHostId] = React.useState("");
   const [sharing, setSharing] = React.useState(false);
+  const screenSource = React.useRef<MediaStream | null>(null);
   const screenTrack = React.useRef<MediaStreamTrack | null>(null);
   const iceRestarting = React.useRef(false);
   const iceRestartTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -450,7 +451,9 @@ export function Room({ roomId }: RoomProps) {
     peer.current?.close();
     localStream.current?.getTracks().forEach(t => t.stop());
     screenTrack.current?.stop();
+    screenSource.current?.getTracks().forEach(track => track.stop());
     screenTrack.current = null;
+    screenSource.current = null;
   }, []);
 
   function toggleMic() { const next = !mic; localStream.current?.getAudioTracks().forEach(t => t.enabled = next); setMic(next); }
@@ -466,21 +469,24 @@ export function Room({ roomId }: RoomProps) {
       if (sender && cameraTrack) await sender.replaceTrack(cameraTrack);
       screenTrack.current?.stop();
       screenTrack.current = null;
+      screenSource.current = null;
       setSharing(false);
       return;
     }
     try {
-      const display = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      const display = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
       const track = display.getVideoTracks()[0];
       const sender = pc.getSenders().find(item => item.track?.kind === "video");
       if (!sender) { track.stop(); return; }
       await sender.replaceTrack(track);
       screenTrack.current = track;
+      screenSource.current = display;
       setSharing(true);
       track.onended = () => {
-        const cameraTrack = stream.getVideoTracks()[0];
-        void sender.replaceTrack(cameraTrack).then(() => {
+        const cameraTrack = stream.getVideoTracks().find(item => item !== track);
+        void (cameraTrack ? sender.replaceTrack(cameraTrack) : Promise.resolve()).then(() => {
           screenTrack.current = null;
+          screenSource.current = null;
           setSharing(false);
         });
       };
