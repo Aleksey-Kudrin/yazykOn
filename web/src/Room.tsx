@@ -185,7 +185,9 @@ export function Room({ roomId }: RoomProps) {
           }
           if (message.type === "lobby-on") { setLobby(true); return; }
           if (message.type === "lobby-off") { setLobby(false); setWaitingPeers([]); return; }
-          if (message.type === "peer-joined") {
+          if (message.type === "role-updated") { const data = JSON.parse(message.data ?? "{}"); setMembers(current => current.map(m => m.id === data.userId ? { ...m, role: data.role } : m)); return; }
+
+    if (message.type === "peer-joined") {
             setParticipants(current => current.some(p => p.peerId === message.peerId) ? current : [...current, { peerId: message.peerId, userId: message.data?.userId, role: message.data?.role }]);
             setStatus("Новый участник подключился");
             return;
@@ -317,7 +319,7 @@ export function Room({ roomId }: RoomProps) {
 
   async function refreshMembers() { try { setMembers(await getRoomMembers(roomId)); } catch { setMembers([]); } }
 
-  async function changeMemberRole(userId: string, role: "cohost" | "member") { try { await setRoomMemberRole(roomId, userId, role); await refreshMembers(); setStatus("Роль участника изменена"); } catch { setStatus("Не удалось изменить роль"); } }
+  async function changeMemberRole(userId: string, role: "cohost" | "member") { try { await setRoomMemberRole(roomId, userId, role); await refreshMembers(); if (socketRef.current?.readyState === WebSocket.OPEN) socketRef.current.send(JSON.stringify({ type: "role-update", roomId, data: JSON.stringify({ userId, role }) })); setStatus("Роль участника изменена"); } catch { setStatus("Не удалось изменить роль"); } }
 
   function muteParticipant(peerId: string) {
     const ws = socket.current;
