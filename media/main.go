@@ -10,6 +10,10 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os/signal"
+	"syscall"
+	"context"
+	"sync/atomic"
 	"net"
 	"os"
 	"strconv"
@@ -92,6 +96,8 @@ type PublishedTrack struct {
 var (
 	mediaConnMu sync.Mutex
 	mediaConnByIP = map[string]int{}
+	activePeers atomic.Int64
+	activeRooms atomic.Int64
 	upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
 		if origin == "" { return true }
@@ -146,6 +152,7 @@ func getRoom(id string) *Room {
 	}
 	r := &Room{id: id, peers: make(map[string]*Peer), tracks: make(map[string]*PublishedTrack)}
 	rooms[id] = r
+	activeRooms.Add(1)
 	return r
 }
 
@@ -175,16 +182,37 @@ func send(p *Peer, msg Signal) error {
 }
 
 func main() {
-	http.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+  mux := http.NewServeMux()
+  http.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"ok":true,"service":"yazykOn-sfu","version":"0.5.0","mediaUdpRange":"50000-50100"}`))
 	})
 	http.HandleFunc("/ws", handleWS)
 	http.HandleFunc("/control/role", handleRoleControl)
 	http.HandleFunc("/control/chat", handleChatControl)
-
-	log.Printf("языкOn custom SFU listening on :4000, media UDP :50000-50100, public ICE IPs: %v", envList("WEBRTC_PUBLIC_IP"))
-	log.Fatal(http.ListenAndServe(":4000", nil))
+  http.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
+    w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+    _, _ = w.Write([]byte("yazykon_media_active_peers " + strconv.FormatInt(activePeers.Load(), 10) + "\n" +
+      "yazykon_media_active_rooms " + strconv.FormatInt(activeRooms.Load(), 10) + "\n"))
+  })
+  srv := &http.Server{Addr: ":4000", Handler: nil}
+  go func() {
+    log.Printf("языкOn custom SFU listening on :4000, media UDP :50000-50100, public ICE IPs: %v", envList("WEBRTC_PUBLIC_IP"))
+    if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed { log.Fatal(err) }
+  }()
+  signals := make(chan os.Signal, 1)
+  signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+  <-signals
+  ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second); defer cancel()
+  _ = srv.Shutdown(ctx)
+  roomsMu.Lock()
+  snapshot := make([]*Room, 0, len(rooms)); for _, room := range rooms { snapshot = append(snapshot, room) }
+  rooms = map[string]*Room{}
+  roomsMu.Unlock()
+  for _, room := range snapshot {
+    room.mu.RLock(); peers := make([]*Peer, 0, len(room.peers)); for _, p := range room.peers { peers = append(peers, p) }; room.mu.RUnlock()
+    for _, p := range peers { removePeer(p) }
+  }
 }
 
 func mediaControlAuthorized(r *http.Request) bool {
@@ -336,6 +364,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 	room.mu.Lock()
 	me.waiting = room.lobby && claims.Role != "host" && claims.Role != "cohost"
 	room.peers[id] = me
+	activePeers.Add(1)
 	others := make([]*Peer, 0, len(room.peers)-1)
 	for pid, p := range room.peers {
 		if pid != id && !p.waiting {
@@ -677,6 +706,7 @@ func removePeer(p *Peer) {
 	}
 	p.room.mu.Lock()
 	delete(p.room.peers, p.id)
+	activePeers.Add(-1)
 	removedTracks := make([]string, 0)
 	for id, t := range p.room.tracks {
 		if t.ownerID == p.id {
@@ -720,6 +750,7 @@ func removePeer(p *Peer) {
 		roomsMu.Lock()
 		delete(rooms, p.room.id)
 		roomsMu.Unlock()
+		activeRooms.Add(-1)
 	}
 }
 
