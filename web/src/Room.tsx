@@ -60,6 +60,8 @@ export function Room({ roomId }: RoomProps) {
   const [sharing, setSharing] = React.useState(false);
   const screenTrack = React.useRef<MediaStreamTrack | null>(null);
   const iceRestarting = React.useRef(false);
+  const reconnectTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectAttempt = React.useRef(0);
   const [chat, setChat] = React.useState<ChatMessage[]>([]);
   const [chatText, setChatText] = React.useState("");
   const [members, setMembers] = React.useState<RoomMember[]>([]);
@@ -291,12 +293,21 @@ export function Room({ roomId }: RoomProps) {
           if (message.type === "error") setStatus(`Ошибка SFU: ${message.error ?? message.data?.code ?? "UNKNOWN"}`);
         };
         ws.onerror = () => setStatus("Ошибка соединения с SFU");
-        ws.onclose = () => { if (!stopped) setStatus("SFU отключён"); };
+        ws.onclose = () => {
+          if (stopped) return;
+          setConnected(false);
+          const attempt = Math.min(reconnectAttempt.current++, 6);
+          const delay = Math.min(30000, 1000 * 2 ** attempt);
+          setStatus(`SFU отключён — переподключение через ${Math.ceil(delay / 1000)} с…`);
+          if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+          reconnectTimer.current = setTimeout(() => window.location.reload(), delay);
+        };
       } catch (error) { console.error(error); setStatus("Нет доступа к камере или микрофону"); }
     }
     void start();
     return () => {
       stopped = true;
+      if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       socket.current?.close();
       peer.current?.close();
       localStream.current?.getTracks().forEach(t => t.stop());
