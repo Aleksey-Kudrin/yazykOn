@@ -1,0 +1,3 @@
+import { test, expect } from "@playwright/test";
+const ep=process.env.SFU_PRIMARY_URL??"http://127.0.0.1:4100";
+test("signaling remains responsive under delayed client processing",async({browser})=>{test.skip(!process.env.SFU_FAILOVER_LIVE,"Set SFU_FAILOVER_LIVE=1");const p=await browser.newPage();try{const start=Date.now();const r=await p.request.get(ep+"/health");expect(r.ok()).toBeTruthy();expect(Date.now()-start).toBeLessThan(Number(process.env.SFU_HEALTH_MAX_MS??3000));await p.waitForTimeout(750);const r2=await p.request.get(ep+"/health");expect(r2.ok()).toBeTruthy()}finally{await p.close()}});
