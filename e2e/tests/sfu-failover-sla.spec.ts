@@ -101,7 +101,7 @@ async function waitRemoteFrame(page: import("@playwright/test").Page) {
       requestAnimationFrame(check);
     };
     check();
-  });
+  }));
 }
 
 test("SFU failover SLA measures actual remote media recovery", async ({ browser }) => {
