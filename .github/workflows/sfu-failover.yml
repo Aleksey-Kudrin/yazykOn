@@ -45,6 +45,22 @@ jobs:
           SFU_PRIMARY_URL: http://127.0.0.1:4100
           SFU_SECONDARY_URL: http://127.0.0.1:4200
         run: npx playwright test tests/sfu-failover.spec.ts tests/sfu-room-ownership.spec.ts tests/sfu-browser-media-failover.spec.ts tests/sfu-multi-participant.spec.ts tests/sfu-failover-stress.spec.ts tests/sfu-load-soak.spec.ts tests/sfu-metrics.spec.ts tests/sfu-failover-latency.spec.ts tests/sfu-failover-sla.spec.ts
+      - name: Collect failover artifacts
+        if: always()
+        working-directory: .
+        run: |
+          mkdir -p e2e/artifacts
+          docker compose -p yazykon-sfu-it -f e2e/docker-compose.sfu-failover.yml ps > e2e/artifacts/compose-ps.txt || true
+          docker compose -p yazykon-sfu-it -f e2e/docker-compose.sfu-failover.yml logs --no-color > e2e/artifacts/sfu.log || true
+          curl -fsS http://127.0.0.1:4100/metrics > e2e/artifacts/primary-metrics.txt || true
+          curl -fsS http://127.0.0.1:4200/metrics > e2e/artifacts/secondary-metrics.txt || true
+      - name: Upload failover artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yazykon-sfu-failover-${{ github.run_id }}
+          path: e2e/artifacts
+          if-no-files-found: warn
       - name: Cleanup
         if: always()
         working-directory: .
