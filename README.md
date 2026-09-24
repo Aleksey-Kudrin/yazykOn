@@ -1,53 +1,52 @@
 # языкOn
 
-Self-hosted video conferencing platform for Proxmox.
+Self-hosted video conferencing platform for Proxmox, built around native WebRTC and a custom Go/Pion SFU.
 
 ## Architecture
 
-языкOn is built without Jitsi. The project uses native WebRTC and a custom signaling layer. A custom SFU is the next media milestone.
+языкOn does not depend on Jitsi. The browser connects to the custom SFU over WebSocket signaling and WebRTC media.
 
 ```
 Browser / Desktop / Android
           |
        WebRTC
           |
-   языкOn Signaling
+   языкOn signaling
           |
-      Custom SFU
+    Custom Go/Pion SFU
           |
        RTP/RTCP
 ```
 
 ## Stack
 
-- Web: TypeScript + React
-- Signaling/API: Node.js + TypeScript + Express + WebSocket
-- Media: native WebRTC
-- SFU: custom, planned
-- Desktop: Electron + TypeScript
-- Android: Kotlin
-- Database: PostgreSQL, planned
-- Cache/presence: Redis, planned
-- TURN: coturn, planned
-- Reverse proxy: Nginx, planned
+- Web: TypeScript + React + Vite
+- API/control plane: Node.js + TypeScript + Express
+- Media plane: Go + Pion WebRTC
+- Signaling: WebSocket
+- Reverse proxy: Nginx
 - Deployment: Docker Compose on Proxmox LXC
+- PostgreSQL, Redis and coturn: planned
+- Desktop: Electron, planned
+- Android: Kotlin, planned
 
 ## Current milestone
 
-The web client now has a native WebRTC 1-to-1 call:
+The project has a working custom SFU prototype:
 
-- room creation;
-- WebSocket signaling;
+- room creation through the API;
+- browser WebRTC connection to the SFU;
 - camera and microphone;
-- local and remote video;
-- mute/unmute;
-- camera on/off;
-- ICE candidate exchange;
-- WebRTC offer/answer.
+- local video;
+- multi-participant remote media fan-out;
+- peer lifecycle cleanup;
+- serialized SFU renegotiation;
+- deterministic SFU UDP media range: `50000-50100`;
+- Nginx WebSocket/media proxying;
+- Docker Compose deployment;
+- GitHub Actions builds for server, web and media.
 
-There is no Jitsi dependency.
-
-Rooms and signaling are currently in memory. The next milestone is a custom SFU for multi-user conferences.
+The media server exposes `/health` and `/ws`. The current room state is in memory; authentication, persistence, TURN and production hardening are not implemented yet.
 
 ## Development
 
@@ -67,35 +66,42 @@ npm install
 npm run dev
 ```
 
-Set `VITE_API_URL` when the API is hosted separately.
+### Media SFU
 
-## Planned features
+```bash
+cd media
+go mod tidy
+go run .
+```
 
-- Custom SFU
-- Multi-user conferences
-- Screen sharing
-- Participant list
-- Text chat
-- Room passwords
-- Lobby
-- Authentication
-- PostgreSQL persistence
-- Redis presence
-- TURN
-- Windows desktop client
-- Android client
-- Russian UI with internationalization
+For the Docker deployment, the web application uses `/media` as the SFU WebSocket path and exposes UDP media ports `50000-50100`.
+
+## Planned roadmap
+
+1. SFU lifecycle and track-removal correctness
+2. ICE/STUN/TURN configuration and NAT traversal
+3. Participant list, screen sharing and chat
+4. Host/co-host controls, lobby and room locking
+5. Authentication and PostgreSQL persistence
+6. Redis presence/pub-sub
+7. Recording and optional captions
+8. Breakout rooms
+9. Security hardening and rate limits
+10. Playwright/browser, Go and load testing
+11. Windows desktop client
+12. Android client
 
 ## Repository structure
 
 ```
-server/       API + WebSocket signaling
+server/       API + control/signaling layer
+media/        Custom Go/Pion SFU
 web/          Browser client
 desktop/      Windows client
 android/      Android client
-deploy/       Proxmox/Docker deployment
+deploy/       Docker Compose + Nginx
 docs/         Architecture and API documentation
-.github/      CI/CD
+.github/      CI
 ```
 
 ## License
