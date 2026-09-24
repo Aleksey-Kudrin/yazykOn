@@ -23,6 +23,7 @@ interface Client {
   socket: WebSocket;
   roomId: string;
   peerId: string;
+  sessionId: string;
 }
 
 interface SignalMessage {
@@ -34,10 +35,12 @@ interface SignalMessage {
 
 interface ClusterSignal {
   sourceNode: string;
-  type: "peer-joined" | "peer-left" | "signal";
+  type: "peer-joined" | "peer-left" | "peer-replaced" | "signal";
   roomId: string;
   peerId: string;
   targetPeerId?: string;
+  targetNodeId?: string;
+  targetSessionId?: string;
   data?: unknown;
 }
 
@@ -81,6 +84,15 @@ async function ensureRoomSubscription(roomId: string) {
       return;
     }
 
+    if (event.type === "peer-replaced" && event.targetNodeId === NODE_ID && event.targetSessionId) {
+      const target = [...room.values()].find(client => client.sessionId === event.targetSessionId && client.peerId === event.peerId);
+      if (target) {
+        send(target.socket, { type: "session-replaced", peerId: target.peerId });
+        target.socket.close(4001, "session-replaced");
+      }
+      return;
+    }
+
     if (event.type === "signal" && event.targetPeerId) {
       const target = room.get(event.targetPeerId);
       if (target) send(target.socket, { type: event.data && (event.data as { signalType?: string }).signalType || "error", peerId: event.peerId, data: event.data && (event.data as { payload?: unknown }).payload });
@@ -94,21 +106,22 @@ async function publishRoomEvent(roomId: string, event: Omit<ClusterSignal, "sour
 }
 
 async function registerClient(client: Client) {
-  if (!redisEnabled()) return;
+  if (!redisEnabled()) return null;
   await ensureRoomSubscription(client.roomId);
-  await redisRegisterPeer(client.roomId, client.peerId, NODE_ID, PEER_TTL_SECONDS);
+  const previous = await redisRegisterPeer(client.roomId, client.peerId, NODE_ID, client.sessionId, PEER_TTL_SECONDS);
   const timer = setInterval(() => {
-    void redisRefreshPeer(client.roomId, client.peerId, NODE_ID, PEER_TTL_SECONDS);
+    void redisRefreshPeer(client.roomId, client.peerId, NODE_ID, client.sessionId, PEER_TTL_SECONDS);
   }, Math.max(5000, Math.floor(PEER_TTL_SECONDS * 1000 / 2)));
-  heartbeatTimers.set(client.peerId, timer);
+  heartbeatTimers.set(client.sessionId, timer);
+  return previous;
 }
 
 async function unregisterClient(client: Client) {
-  const timer = heartbeatTimers.get(client.peerId);
+  const timer = heartbeatTimers.get(client.sessionId);
   if (timer) clearInterval(timer);
-  heartbeatTimers.delete(client.peerId);
+  heartbeatTimers.delete(client.sessionId);
   if (!redisEnabled()) return;
-  await redisRemovePeer(client.roomId, client.peerId, NODE_ID);
+  await redisRemovePeer(client.roomId, client.peerId, NODE_ID, client.sessionId);
   const room = rooms.get(client.roomId);
   if (!room || room.size === 0) await redisUnsubscribe(redisRoomChannel(client.roomId));
 }
@@ -142,16 +155,25 @@ export function attachSignaling(server: HttpServer) {
         const roomId = message.roomId.toUpperCase();
         const peerId = message.peerId || randomUUID();
         const room = localRoom(roomId);
-        if (room.has(peerId)) {
-          send(socket, { type: "error", error: "PEER_ID_IN_USE" });
-          return;
+        const existing = room.get(peerId);
+        if (existing) {
+          send(existing.socket, { type: "session-replaced", peerId });
+          existing.socket.close(4001, "session-replaced");
         }
 
-        client = { socket, roomId, peerId };
+        client = { socket, roomId, peerId, sessionId: randomUUID() };
         room.set(peerId, client);
 
         void (async () => {
-          await registerClient(client!);
+          const previous = await registerClient(client!);
+          if (previous && previous.sessionId !== client!.sessionId) {
+            await publishRoomEvent(roomId, {
+              type: "peer-replaced",
+              peerId,
+              targetNodeId: previous.nodeId,
+              targetSessionId: previous.sessionId
+            });
+          }
           const clusterPeers = redisEnabled() ? await redisListPeers(roomId) : [];
           const existingPeers = new Set([...room.keys()]);
           for (const peer of clusterPeers) existingPeers.add(peer.peerId);
@@ -201,13 +223,17 @@ export function attachSignaling(server: HttpServer) {
     socket.on("close", () => {
       if (!client) return;
       const current = rooms.get(client.roomId);
-      if (current) {
-        current.delete(client.peerId);
-        for (const other of current.values()) send(other.socket, { type: "peer-left", peerId: client.peerId });
-        if (current.size === 0) rooms.delete(client.roomId);
+      if (current?.get(client.peerId) !== client) {
+        void unregisterClient(client);
+        return;
       }
+
+      current.delete(client.peerId);
+      for (const other of current.values()) send(other.socket, { type: "peer-left", peerId: client.peerId });
+      if (current.size === 0) rooms.delete(client.roomId);
+
       void publishRoomEvent(client.roomId, { type: "peer-left", peerId: client.peerId })
-        .finally(() => unregisterClient(client!));
+        .finally(() => unregisterClient(client));
     });
   });
 
