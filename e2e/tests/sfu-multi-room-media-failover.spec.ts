@@ -44,10 +44,11 @@ async function peerKeys(roomIds: string[]) {
   const { createClient } = await import("redis");
   const client = createClient({ url: redisUrl });
   await client.connect();
-  const keys = await client.keys("yazykon:sfu:peer:*");
-  const filtered = keys.filter(key => roomIds.some(roomId => key.includes(roomId)));
+  const keys = (await Promise.all(
+    roomIds.map(roomId => client.keys("yazykon:sfu:peer:" + roomId + ":*"))
+  )).flat();
   await client.quit();
-  return filtered;
+  return keys;
 }
 
 async function owners(roomIds: string[]) {
@@ -242,6 +243,9 @@ test("multi-room two-party remote media survives bidirectional SFU failover", as
     expect(reverseOwners.every(x => x.owner?.nodeId === "integration-primary")).toBeTruthy();
 
     const metricsAfter = await runtimeMetrics(primary);
+    expect(Number(metricsAfter.yazykon_media_active_peers)).toBeLessThanOrEqual(Number(metricsBefore.yazykon_media_active_peers) + rooms * 2);
+    expect(Number(metricsAfter.yazykon_media_active_rooms)).toBeLessThanOrEqual(Number(metricsBefore.yazykon_media_active_rooms) + rooms);
+    expect(Number(metricsAfter.yazykon_media_active_tracks)).toBeLessThanOrEqual(Number(metricsBefore.yazykon_media_active_tracks) + rooms * 2);
     const recoveredPeerKeys = await peerKeys(roomIds);
     expect(recoveredPeerKeys.length).toBeLessThanOrEqual(initialPeerKeys.length + rooms);
     const recoveredPeerIds = recovered.flatMap(x => [x.a.peerId, x.b.peerId]);
@@ -285,20 +289,14 @@ test("multi-room two-party remote media survives bidirectional SFU failover", as
     fs.mkdirSync(artifactDir, { recursive: true });
     fs.writeFileSync(path.join(artifactDir, "sfu-multi-room-media-failover-report.json"), JSON.stringify(report, null, 2));
   } finally {
-    try {
-      const beforeCleanup = await peerKeys(roomIds);
-      await Promise.all(roomIds.flatMap((roomId, i) => [
-        cleanup(pages[i * 2], roomId),
-        cleanup(pages[i * 2 + 1], roomId)
-      ]));
-      await new Promise(resolve => setTimeout(resolve, 500));
-      const afterCleanup = await peerKeys(roomIds);
-      if (beforeCleanup.length > 0 && afterCleanup.length > beforeCleanup.length) {
-        throw new Error("peer key count increased during cleanup");
-      }
-    } catch (error) {
-      console.warn("cleanup peer-key verification skipped:", error);
-    }
+    const beforeCleanup = await peerKeys(roomIds);
+    await Promise.all(roomIds.flatMap((roomId, i) => [
+      cleanup(pages[i * 2], roomId),
+      cleanup(pages[i * 2 + 1], roomId)
+    ]));
+    await new Promise(resolve => setTimeout(resolve, ttlMs + 500));
+    const afterCleanup = await peerKeys(roomIds);
+    expect(afterCleanup.length).toBeLessThanOrEqual(beforeCleanup.length);
     execFileSync("docker", ["compose", "-f", composeFile, "start", "sfu-primary", "sfu-secondary"], { stdio: "inherit" });
     await Promise.all(roomIds.flatMap((roomId, i) => [cleanup(pages[i * 2], roomId), cleanup(pages[i * 2 + 1], roomId)]));
     await Promise.all(pages.map(p => p.close()));
