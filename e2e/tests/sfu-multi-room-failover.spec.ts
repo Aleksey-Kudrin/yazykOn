@@ -168,6 +168,7 @@ test("multiple active rooms transfer ownership and reconnect on secondary", asyn
     };
 
     const report = {
+      generatedAt: new Date().toISOString(),
       rooms, roomIds,
       failoverMs: Date.now() - failoverStarted,
       reconnectMs,
