@@ -9,6 +9,7 @@ function Home() {
   const [room, setRoom] = React.useState<{ id: string; name: string } | null>(null);
   const [name, setName] = React.useState("Моя конференция");
   const [loading, setLoading] = React.useState(false);
+  const [password, setPassword] = React.useState("");
 
   React.useEffect(() => {
     fetch((import.meta.env.VITE_API_URL ?? "http://localhost:3000") + "/api/health")
@@ -20,7 +21,7 @@ function Home() {
   async function handleCreateRoom() {
     setLoading(true);
     try {
-      const created = await createRoom(name);
+      const created = await createRoom(name, password);
       setRoom(created);
       window.history.pushState({}, "", `/room/${created.id}`);
       window.dispatchEvent(new PopStateEvent("popstate"));
@@ -50,6 +51,14 @@ function Home() {
           maxLength={100}
         />
 
+        <input
+          type="password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          placeholder="Пароль комнаты (необязательно)"
+          maxLength={128}
+        />
+
         <button disabled={loading} onClick={handleCreateRoom}>
           {loading ? "Создание…" : "Создать конференцию"}
         </button>
@@ -57,7 +66,7 @@ function Home() {
         {room && (
           <div className="room">
             <strong>{room.name}</strong>
-            <div>Код комнаты: <code>{room.id}</code></div>
+            <div>Код комнаты: <code>{room.id}</code>{room.requiresPassword ? " • 🔒 пароль защищает вход" : ""}</div>
           </div>
         )}
       </section>
