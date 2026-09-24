@@ -42,7 +42,7 @@ jobs:
           REDIS_URL: redis://127.0.0.1:6379
           SFU_PRIMARY_URL: http://127.0.0.1:4100
           SFU_SECONDARY_URL: http://127.0.0.1:4200
-        run: npx playwright test tests/sfu-failover.spec.ts tests/sfu-room-ownership.spec.ts tests/sfu-browser-media-failover.spec.ts tests/sfu-multi-participant.spec.ts tests/sfu-failover-stress.spec.ts
+        run: npx playwright test tests/sfu-failover.spec.ts tests/sfu-room-ownership.spec.ts tests/sfu-browser-media-failover.spec.ts tests/sfu-multi-participant.spec.ts tests/sfu-failover-stress.spec.ts tests/sfu-load-soak.spec.ts
       - name: Cleanup
         if: always()
         working-directory: .
