@@ -523,7 +523,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		case "moderate":
 			var cmd ModerationCommand
 			if json.Unmarshal(msg.Data, &cmd) != nil || cmd.Action == "" { continue }
-			if me.role != "host" && me.role != "cohost" {
+			if !canModerate(me, nil, cmd.Action) {
 				_ = send(me, Signal{Type: "error", Data: mustJSON(map[string]string{"code": "MODERATION_DENIED"})})
 				continue
 			}
@@ -595,7 +595,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 			target := findPeer(room, cmd.PeerID)
 			if target != nil {
-				if target.role == "host" && me.role != "host" { _ = send(me, Signal{Type: "error", Data: mustJSON(map[string]string{"code": "MODERATION_DENIED"}) }); continue }
+				if !canModerate(me, target, cmd.Action) { _ = send(me, Signal{Type: "error", Data: mustJSON(map[string]string{"code": "MODERATION_DENIED"}) }); continue }
 				if cmd.Action == "mute" { _ = send(target, Signal{Type: "muted", Data: mustJSON(map[string]string{"by": me.id}) })
 				} else { _ = send(target, Signal{Type: "removed", Data: mustJSON(map[string]string{"reason": "removed_by_host"})}); removePeer(target) }
 			}
@@ -618,6 +618,12 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	removePeer(me)
+}
+
+func canModerate(actor, target *Peer, action string) bool {
+  if actor == nil || (actor.role != "host" && actor.role != "cohost") { return false }
+  if target != nil && target.role == "host" && actor.role != "host" { return false }
+  return action == "remove" || action == "mute" || action == "lobby-on" || action == "lobby-off" || action == "approve" || action == "deny" || action == "lock" || action == "unlock"
 }
 
 func roomHostID(room *Room) string {
