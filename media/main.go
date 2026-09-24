@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -123,6 +124,16 @@ func envList(name string) []string {
 	return values
 }
 
+func maxRoomPeers() int {
+	value := 32
+	if raw := os.Getenv("MAX_ROOM_PEERS"); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 2 && parsed <= 500 {
+			value = parsed
+		}
+	}
+	return value
+}
+
 func getRoom(id string) *Room {
 	roomsMu.Lock()
 	defer roomsMu.Unlock()
@@ -146,7 +157,7 @@ func verifyRoomAccessToken(roomID, token string) (AccessClaims, bool) {
   if err != nil || !hmac.Equal(mac.Sum(nil), expected) { return claims, false }
   payload, err := base64.RawURLEncoding.DecodeString(parts[0])
   if err != nil || json.Unmarshal(payload, &claims) != nil { return claims, false }
-  if claims.RoomID != roomID || claims.UserID == "" || (claims.Role != "host" && claims.Role != "cohost" && claims.Role != "member") || claims.Exp < time.Now().Unix() { return claims, false }
+  if strings.ToUpper(claims.RoomID) != strings.ToUpper(roomID) || claims.UserID == "" || (claims.Role != "host" && claims.Role != "cohost" && claims.Role != "member") || claims.Exp < time.Now().Unix() { return claims, false }
   return claims, true
 }
 
@@ -265,8 +276,26 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	room := getRoom(first.RoomID)
+	roomID := strings.ToUpper(strings.TrimSpace(first.RoomID))
+	if len(roomID) < 1 || len(roomID) > 64 {
+		_ = pc.Close()
+		_ = conn.WriteJSON(Signal{Type: "error", Data: mustJSON(map[string]string{"code": "INVALID_ROOM_ID"})})
+		return
+	}
+	room := getRoom(roomID)
 	room.mu.Lock()
+	if _, exists := room.peers[id]; exists {
+		room.mu.Unlock()
+		_ = pc.Close()
+		_ = conn.WriteJSON(Signal{Type: "error", Data: mustJSON(map[string]string{"code": "DUPLICATE_PEER_ID"})})
+		return
+	}
+	if len(room.peers) >= maxRoomPeers() {
+		room.mu.Unlock()
+		_ = pc.Close()
+		_ = conn.WriteJSON(Signal{Type: "error", Data: mustJSON(map[string]string{"code": "ROOM_FULL"})})
+		return
+	}
 	if room.hostID == "" && claims.Role == "host" {
 		room.hostID = id
 	}
