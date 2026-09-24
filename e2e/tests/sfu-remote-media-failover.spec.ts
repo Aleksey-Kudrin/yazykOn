@@ -104,7 +104,7 @@ async function waitForFrame(page: import("@playwright/test").Page) {
     const timer = setTimeout(() => reject(new Error("remote video frame timeout")), 15000);
     const check = () => {
       const videos = [...document.querySelectorAll("video")];
-      if (videos.some(video => video.readyState >= 2)) {
+      if (videos.some(video => video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0)) {
         clearTimeout(timer);
         resolve();
         return;
