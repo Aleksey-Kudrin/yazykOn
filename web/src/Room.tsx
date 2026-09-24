@@ -426,7 +426,7 @@ export function Room({ roomId }: RoomProps) {
           if (message.type === "error") {
             if (message.data?.code === "SFU_ROOM_OWNER" && message.data?.endpoint) {
               const ownerEndpoint = String(message.data.endpoint);
-              const ownerIndex = endpoints.findIndex(value => value === ownerEndpoint || value.replace(/\\/ws$/, "") === ownerEndpoint.replace(/\\/ws$/, ""));
+              const ownerIndex = endpoints.findIndex(value => value === ownerEndpoint || value.replace(/\/ws$/, "") === ownerEndpoint.replace(/\/ws$/, ""));
               if (ownerIndex >= 0) {
                 mediaEndpointRef.current = ownerIndex;
                 redirecting.current = true;
