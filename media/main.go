@@ -304,12 +304,14 @@ func clusterRenewOwnedRooms() {
 	defer cancel()
 	for _, room := range roomSnapshot {
 		key := clusterOwnerKey(room.id)
-		current, err := client.Get(ctx, key).Result()
-		if err != nil { continue }
-		var owner struct { NodeID string `json:"nodeId"` }
-		if json.Unmarshal([]byte(current), &owner) != nil || owner.NodeID != nodeID { continue }
 		payload := mustJSON(map[string]any{"nodeId": nodeID, "endpoint": clusterNodeEndpoint()})
-		_ = client.Set(ctx, key, payload, sfuRoomOwnerTTL()).Err()
+		const renewScript = `local current = redis.call("GET", KEYS[1])
+if not current then return 0 end
+local ok, owner = pcall(cjson.decode, current)
+if not ok or owner.nodeId ~= ARGV[1] then return 0 end
+redis.call("SET", KEYS[1], ARGV[2], "PX", ARGV[3])
+return 1`
+		_, _ = client.Eval(ctx, renewScript, []string{key}, nodeID, payload, strconv.FormatInt(sfuRoomOwnerTTL().Milliseconds(), 10)).Result()
 	}
 }
 
@@ -322,11 +324,12 @@ func clusterReleaseRoom(roomID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	key := clusterOwnerKey(roomID)
-	current, err := client.Get(ctx, key).Result()
-	if err != nil { return }
-	var owner struct { NodeID string `json:"nodeId"` }
-	if json.Unmarshal([]byte(current), &owner) != nil || owner.NodeID != nodeID { return }
-	_ = client.Del(ctx, key).Err()
+	const releaseScript = `local current = redis.call("GET", KEYS[1])
+if not current then return 0 end
+local ok, owner = pcall(cjson.decode, current)
+if not ok or owner.nodeId ~= ARGV[1] then return 0 end
+return redis.call("DEL", KEYS[1])`
+	_, _ = client.Eval(ctx, releaseScript, []string{key}, nodeID).Result()
 }
 
 func clusterInit() func() {
