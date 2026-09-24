@@ -52,6 +52,11 @@ type ModerationCommand struct {
 	PeerID string `json:"peerId"`
 }
 
+type RoleUpdate struct {
+	UserID string `json:"userId"`
+	Role string `json:"role"`
+}
+
 type Peer struct {
 	id        string
 	userID    string
@@ -375,6 +380,22 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 					negotiationFinished(me)
 				}
 			}
+		case "role-update":
+			var update RoleUpdate
+			if json.Unmarshal(msg.Data, &update) != nil || update.UserID == "" { continue }
+			if me.role != "host" { _ = send(me, Signal{Type: "error", Data: mustJSON(map[string]string{"code": "ROLE_UPDATE_DENIED"})}); continue }
+			if update.Role != "cohost" && update.Role != "member" { continue }
+			room.mu.RLock()
+			var target *Peer
+			for _, p := range room.peers { if p.userID == update.UserID { target = p; break } }
+			room.mu.RUnlock()
+			if target == nil { continue }
+			target.mu.Lock()
+			if target.role != "host" { target.role = update.Role }
+			newRole := target.role
+			target.mu.Unlock()
+			_ = send(target, Signal{Type: "role-updated", Data: mustJSON(map[string]string{"userId": target.userID, "role": newRole})})
+
 		case "moderate":
 			var cmd ModerationCommand
 			if json.Unmarshal(msg.Data, &cmd) != nil || cmd.Action == "" { continue }
