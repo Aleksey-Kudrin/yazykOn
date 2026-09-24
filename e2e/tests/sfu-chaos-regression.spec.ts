@@ -110,7 +110,7 @@ test("SFU chaos regression keeps recovery latency and active-state bounded", asy
     await waitHealth(primary);
     await waitHealth(secondary);
 
-    const initial = await join(primary, roomId);
+    const initial = await join(page, primary, roomId);
     peerId = initial.peerId;
     expect(peerId).toBeTruthy();
 
@@ -118,17 +118,17 @@ test("SFU chaos regression keeps recovery latency and active-state bounded", asy
       const started = Date.now();
       execFileSync("docker", ["compose", "-f", composeFile, "stop", "sfu-primary"], { stdio: "inherit" });
 
-      const recovered = await join(secondary, roomId, peerId);
+      const recovered = await join(page, secondary, roomId, peerId);
       const elapsed = Date.now() - started;
       recoveryMs.push(elapsed);
       expect(recovered.peerId).toBe(peerId);
       recovered.close();
 
-      execFileSync("docker", ["compose", "-f", composeFile, "start", "sfu-primary"], { stdio: "inherit" });
+      recovered.close();\n\n      execFileSync("docker", ["compose", "-f", composeFile, "start", "sfu-primary"], { stdio: "inherit" });
       await waitHealth(primary);
     }
 
-    const after = await Promise.all([metrics(primary), metrics(secondary)]);
+    initial.close();\n    await new Promise(resolve => setTimeout(resolve, 1000));\n    const after = await Promise.all([metrics(primary), metrics(secondary)]);
     const percentile = (values: number[], p: number) => {
       const sorted = [...values].sort((a, b) => a - b);
       return sorted[Math.min(sorted.length - 1, Math.ceil(values.length * p) - 1)];
