@@ -137,7 +137,7 @@ async function currentUser(req: express.Request) {
   return result.rows[0] ?? null;
 }
 
-function requireScrypt(password: string, salt: string) { return scryptSync(password, salt, 32, { N: 32768, r: 8, p: 2, maxmem: 64 * 1024 * 1024 }).toString("hex"); }
+function requireScrypt(password: string, salt: string) { return scryptSync(password, salt, 32).toString("hex"); }
 
 async function writeAuditEvent(input: { userId?: string | null; roomId?: string | null; action: string; targetUserId?: string | null; ip?: string | null }) {
   if (!db) return;
