@@ -8,6 +8,8 @@ export interface Room {
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
 
+function apiUrl(path: string): string { return `${API_URL}${path}`; }
+
 export async function createRoom(name: string, password = ""): Promise<Room> {
   const response = await fetch(`${API_URL}/api/rooms`, {
     method: "POST",
@@ -36,6 +38,13 @@ export async function accessRoom(id: string, password = ""): Promise<{ accessTok
   if (!response.ok) {
     throw new Error(data.error === "INVALID_ROOM_PASSWORD" ? "Неверный пароль комнаты" : "Не удалось получить доступ к комнате");
   }
+  return data;
+}
+
+export async function refreshRoomAccessToken(id: string): Promise<{ accessToken: string; role: "host" | "cohost" | "member" }> {
+  const response = await fetch(apiUrl(`/api/rooms/${encodeURIComponent(id)}/token`), { method: "POST", credentials: "include" });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.accessToken) throw new Error(data.error ?? "Не удалось обновить токен комнаты");
   return data;
 }
 
