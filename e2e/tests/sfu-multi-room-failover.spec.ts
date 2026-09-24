@@ -30,6 +30,27 @@ async function waitHealth(endpoint: string) {
   throw new Error("SFU health timeout: " + endpoint);
 }
 
+async function runtimeMetrics(endpoint: string) {
+  try {
+    const response = await fetch(endpoint + "/metrics");
+    if (!response.ok) return {};
+    const text = await response.text();
+    const names = [
+      "yazykon_media_active_peers",
+      "yazykon_media_active_rooms",
+      "yazykon_media_active_tracks",
+      "yazykon_media_goroutines",
+      "yazykon_media_heap_bytes"
+    ];
+    return Object.fromEntries(names.map(name => {
+      const line = text.split("\n").find(value => value.startsWith(name + " "));
+      return [name, line ? Number(line.trim().split(/\\s+/)[1]) : null];
+    }));
+  } catch {
+    return {};
+  }
+}
+
 async function redisOwners(roomIds: string[]) {
   const { createClient } = await import("redis");
   const client = createClient({ url: redisUrl });
@@ -86,6 +107,7 @@ test("multiple active rooms transfer ownership and reconnect on secondary", asyn
   );
   const roomIds = Array.from({ length: rooms }, (_, i) => "FAILOVER-ROOM-" + (i + 1));
   const joined = await Promise.all(roomIds.map((roomId, i) => joinRoom(pages[i], primary, roomId)));
+  const metricsBefore = await runtimeMetrics(primary);
   expect(new Set(joined.map(item => item.peerId)).size).toBe(rooms);
 
   const before = await redisOwners(roomIds);
@@ -107,12 +129,15 @@ test("multiple active rooms transfer ownership and reconnect on secondary", asyn
       joinRoom(pages[i], secondary, item.roomId, item.peerId)
     ));
     const reconnectMs = Date.now() - reconnectStarted;
+    const metricsAfter = await runtimeMetrics(secondary);
     expect(reconnectResults.every((item, i) => item.peerId === joined[i].peerId)).toBeTruthy();
 
     const report = {
       rooms, roomIds,
       failoverMs: Date.now() - failoverStarted,
       reconnectMs,
+      metricsBefore,
+      metricsAfter,
       ownersBefore: before.map(item => item.value),
       ownersAfter: after,
       reconnectResults,
