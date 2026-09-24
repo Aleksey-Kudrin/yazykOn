@@ -1,0 +1,44 @@
+name: SFU failover integration
+
+on:
+  workflow_dispatch:
+
+jobs:
+  failover:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: e2e
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+      - name: Start Redis and two SFUs
+        working-directory: .
+        run: |
+          docker compose -p yazykon-sfu-it -f e2e/docker-compose.sfu-failover.yml up -d --build
+      - name: Wait for SFUs
+        run: |
+          for url in http://127.0.0.1:4100/health http://127.0.0.1:4200/health; do
+            for i in $(seq 1 60); do
+              curl -fsS "$url" >/dev/null && break
+              sleep 1
+            done
+          done
+      - name: Run failover probe
+        env:
+          SFU_FAILOVER_LIVE: "1"
+          SFU_FAILOVER_WAIT_MS: "7000"
+          SFU_PRIMARY_URL: http://127.0.0.1:4100
+          SFU_SECONDARY_URL: http://127.0.0.1:4200
+        run: npx playwright test tests/sfu-failover.spec.ts
+      - name: Cleanup
+        if: always()
+        working-directory: .
+        run: docker compose -p yazykon-sfu-it -f e2e/docker-compose.sfu-failover.yml down -v
