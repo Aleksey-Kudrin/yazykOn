@@ -14,6 +14,8 @@ const roomAccessSecret = process.env.ROOM_ACCESS_SECRET ?? "";
 const roomAccessTtlValue = Number(process.env.ROOM_ACCESS_TTL ?? 86400);
 const roomAccessTtl = Number.isFinite(roomAccessTtlValue) ? Math.max(300, roomAccessTtlValue) : 86400;
 const databaseUrl = process.env.DATABASE_URL ?? "";
+const mediaControlUrl = process.env.MEDIA_CONTROL_URL ?? "http://media:4000";
+const mediaControlSecret = process.env.MEDIA_CONTROL_SECRET ?? "";
 const db = databaseUrl ? new Pool({ connectionString: databaseUrl }) : null;
 
 async function initDatabase() {
@@ -273,6 +275,15 @@ app.patch("/api/rooms/:id/members/:userId", async (req, res) => {
   if (req.params.userId === user.id) { res.status(400).json({ error: "CANNOT_CHANGE_OWNER" }); return; }
   const result = await db.query("UPDATE room_members SET role=$1 WHERE room_id=$2 AND user_id=$3 RETURNING role", [role,roomId,req.params.userId]);
   if (!result.rows[0]) { res.status(404).json({ error: "MEMBER_NOT_FOUND" }); return; }
+  if (mediaControlSecret) {
+    try {
+      await fetch(mediaControlUrl.replace(/\\/$/, "") + "/control/role", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + mediaControlSecret },
+        body: JSON.stringify({ roomId, userId: req.params.userId, role })
+      });
+    } catch (error) { console.error("media role sync failed", error); }
+  }
   res.json({ role: result.rows[0].role });
 });
 const server = createServer(app);
