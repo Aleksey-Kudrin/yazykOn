@@ -77,6 +77,8 @@ export function Room({ roomId }: RoomProps) {
   const reconnectAttempt = React.useRef(0);
   const reconnecting = React.useRef(false);
   const connectionGeneration = React.useRef(0);
+  const selfIdRef = React.useRef("");
+  const identityRoomRef = React.useRef<string | null>(null);
   const [chat, setChat] = React.useState<ChatMessage[]>([]);
   const [chatText, setChatText] = React.useState("");
   const [chatHasMore, setChatHasMore] = React.useState(false);
@@ -92,6 +94,11 @@ export function Room({ roomId }: RoomProps) {
     const generation = ++connectionGeneration.current;
     async function start() {
       try {
+        if (identityRoomRef.current !== sfuRoomId) {
+          identityRoomRef.current = sfuRoomId;
+          selfIdRef.current = "";
+          setSelfId("");
+        }
         const room = await getRoom(roomId);
         try { const page = await getRoomMessages(roomId); setChat(current => mergeChatMessages(current, page.messages)); setChatHasMore(page.hasMore); setChatBefore(page.nextBefore); } catch (error) { console.warn("chat history unavailable", error); }
         let accessToken = sfuAccessToken ?? sessionStorage.getItem("yazykon-access-" + sfuRoomId);
@@ -246,7 +253,7 @@ export function Room({ roomId }: RoomProps) {
           reconnectAttempt.current = 0;
           reconnecting.current = false;
           setStatus("Подключено к языкOn SFU");
-          ws.send(JSON.stringify({ type: "join", roomId: sfuRoomId, data: { accessToken } }));
+          ws.send(JSON.stringify({ type: "join", roomId: sfuRoomId, peerId: selfIdRef.current || undefined, data: { accessToken, reconnect: Boolean(selfIdRef.current) } }));
           for (const candidate of pendingLocalIce.current) {
             ws.send(JSON.stringify({ type: "ice", roomId: sfuRoomId, data: candidate }));
           }
@@ -277,6 +284,7 @@ export function Room({ roomId }: RoomProps) {
           const message = JSON.parse(event.data) as SignalMessage;
           if (message.type === "joined") {
             const data = message.data;
+            selfIdRef.current = message.peerId;
             setSelfId(message.peerId);
             setParticipants([participantFromMeta(message.peerId, data?.peerMeta?.[message.peerId]), ...(data?.peers ?? []).map(peerId => participantFromMeta(peerId, data?.peerMeta?.[peerId]))]);
             setHostId(data?.hostId ?? message.peerId);
