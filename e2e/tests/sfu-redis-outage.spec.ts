@@ -24,8 +24,9 @@ async function waitForCluster(endpoint: string, expected: boolean) {
 test("SFU detects Redis control-plane outage and recovery", async () => {
   test.skip(!process.env.SFU_FAILOVER_LIVE, "Set SFU_FAILOVER_LIVE=1 for the live Docker run");
 
-  await waitForCluster(primary, true);
-  await waitForCluster(secondary, true);
+  const initialPrimary = await waitForCluster(primary, true);
+  const initialSecondary = await waitForCluster(secondary, true);
+  expect(initialPrimary.nodeId).not.toBe(initialSecondary.nodeId);
 
   execFileSync("docker", ["compose", "-f", composeFile, "stop", "redis"], { stdio: "inherit" });
   try {
