@@ -26,6 +26,7 @@ export function Room({ roomId }: RoomProps) {
   const peer = React.useRef<RTCPeerConnection | null>(null);
   const localStream = React.useRef<MediaStream | null>(null);
   const pendingIce = React.useRef<RTCIceCandidateInit[]>([]);
+  const pendingLocalIce = React.useRef<RTCIceCandidateInit[]>([]);
   const remoteStreams = React.useRef(new Map<string, MediaStream>());
   const [remotes, setRemotes] = React.useState<Array<{ id: string; stream: MediaStream }>>([]);
   const [status, setStatus] = React.useState("Запуск камеры…");
@@ -42,7 +43,16 @@ export function Room({ roomId }: RoomProps) {
         localStream.current = stream;
         if (localVideo.current) localVideo.current.srcObject = stream;
 
-        const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+        const iceServers: RTCIceServer[] = [];
+        const stunUrl = import.meta.env.VITE_STUN_URL || "stun:stun.l.google.com:19302";
+        iceServers.push({ urls: stunUrl });
+        const turnUrl = import.meta.env.VITE_TURN_URL;
+        const turnUsername = import.meta.env.VITE_TURN_USERNAME;
+        const turnCredential = import.meta.env.VITE_TURN_CREDENTIAL;
+        if (turnUrl && turnUsername && turnCredential) {
+          iceServers.push({ urls: turnUrl, username: turnUsername, credential: turnCredential });
+        }
+        const pc = new RTCPeerConnection({ iceServers });
         peer.current = pc;
         for (const track of stream.getTracks()) pc.addTrack(track, stream);
 
@@ -61,12 +71,30 @@ export function Room({ roomId }: RoomProps) {
 
         const ws = new WebSocket(mediaUrl());
         socket.current = ws;
-        ws.onopen = () => {
+        ws.onopen = async () => {
           setStatus("Подключено к языкOn SFU");
           ws.send(JSON.stringify({ type: "join", roomId }));
+          for (const candidate of pendingLocalIce.current) {
+            ws.send(JSON.stringify({ type: "ice", roomId, data: candidate }));
+          }
+          pendingLocalIce.current = [];
+          try {
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            ws.send(JSON.stringify({ type: "offer", roomId, data: pc.localDescription }));
+          } catch (error) {
+            console.error("initial WebRTC offer failed", error);
+            setStatus("Не удалось начать WebRTC-соединение");
+          }
         };
         pc.onicecandidate = event => {
-          if (event.candidate && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "ice", roomId, data: event.candidate.toJSON() }));
+          if (!event.candidate) return;
+          const candidate = event.candidate.toJSON();
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "ice", roomId, data: candidate }));
+          } else {
+            pendingLocalIce.current.push(candidate);
+          }
         };
         ws.onmessage = async event => {
           const message = JSON.parse(event.data) as SignalMessage;
