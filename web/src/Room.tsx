@@ -33,6 +33,7 @@ export function Room({ roomId }: RoomProps) {
   const [connected, setConnected] = React.useState(false);
   const [mic, setMic] = React.useState(true);
   const [camera, setCamera] = React.useState(true);
+  const [participants, setParticipants] = React.useState<string[]>([]);
 
   React.useEffect(() => {
     let stopped = false;
@@ -106,11 +107,21 @@ export function Room({ roomId }: RoomProps) {
         };
         ws.onmessage = async event => {
           const message = JSON.parse(event.data) as SignalMessage;
-          if (message.type === "joined") { setStatus("Комната подключена"); return; }
-          if (message.type === "peer-joined") { setStatus("Новый участник подключился"); return; }
+          if (message.type === "joined") {
+            const data = message.data;
+            setParticipants([message.peerId, ...(data?.peers ?? [])]);
+            setStatus("Комната подключена");
+            return;
+          }
+          if (message.type === "peer-joined") {
+            setParticipants(current => current.includes(message.peerId) ? current : [...current, message.peerId]);
+            setStatus("Новый участник подключился");
+            return;
+          }
           if (message.type === "peer-left") {
             remoteStreams.current.delete(message.peerId);
             setRemotes(Array.from(remoteStreams.current, ([id, stream]) => ({ id, stream })));
+            setParticipants(current => current.filter(id => id !== message.peerId));
             setStatus("Участник вышел");
             return;
           }
@@ -159,6 +170,10 @@ export function Room({ roomId }: RoomProps) {
       {!remotes.length && <div className="video-tile remote"><span>Ожидание участников</span></div>}
     </section>
     <div className="meeting-status">{status} {connected ? "• online" : ""}</div>
+    <aside className="participants">
+      <strong>Участники ({participants.length})</strong>
+      {participants.map(id => <div key={id} className="participant">{id === participants[0] ? "Вы" : "Участник"} <code>{id.slice(0, 8)}</code></div>)}
+    </aside>
     <nav className="controls"><button onClick={toggleMic}>{mic ? "🎙️ Микрофон" : "🔇 Микрофон"}</button><button onClick={toggleCamera}>{camera ? "📷 Камера" : "🚫 Камера"}</button><a className="leave" href="/">Завершить</a></nav>
   </main>;
 }
