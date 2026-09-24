@@ -26,7 +26,6 @@ jobs:
         run: npm install
       - run: npx playwright install --with-deps chromium
       - name: Start Redis and two SFUs
-        working-directory: .
         run: docker compose -p yazykon-sfu-it -f docker-compose.sfu-failover.yml up -d --build
       - name: Wait for SFUs
         run: |
@@ -150,7 +149,6 @@ jobs:
         run: npx playwright test tests/sfu-failover-gate.spec.ts --workers=1
       - name: Collect failover artifacts
         if: always()
-        working-directory: .
         run: |
           mkdir -p artifacts
           docker compose -p yazykon-sfu-it -f docker-compose.sfu-failover.yml ps > artifacts/compose-ps.txt || true
@@ -167,5 +165,4 @@ jobs:
           if-no-files-found: warn
       - name: Cleanup
         if: always()
-        working-directory: .
         run: docker compose -p yazykon-sfu-it -f docker-compose.sfu-failover.yml down -v
