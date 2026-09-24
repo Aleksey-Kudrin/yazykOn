@@ -23,6 +23,8 @@ test("SFU runtime metrics remain bounded during participant churn", async () => 
   const before = await Promise.all([metrics(primary), metrics(secondary)]);
   expect(Object.keys(before[0]).length).toBeGreaterThanOrEqual(6);
   expect(Object.keys(before[1]).length).toBeGreaterThanOrEqual(6);
+  expect(before[0].yazykon_media_failover_claims_total).toBeGreaterThanOrEqual(0);
+  expect(before[1].yazykon_media_owner_redirects_total).toBeGreaterThanOrEqual(0);
   expect(before[0].yazykon_media_active_peers).toBeGreaterThanOrEqual(0);
   expect(before[1].yazykon_media_active_peers).toBeGreaterThanOrEqual(0);
 
