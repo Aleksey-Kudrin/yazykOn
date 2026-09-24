@@ -187,3 +187,47 @@ button:disabled { opacity: .6; cursor: wait; }
   .video-grid { grid-template-columns: 1fr; }
   .controls { flex-wrap: wrap; }
 }
+
+
+.chat {
+  margin: 0 16px 8px;
+  padding: 10px 12px;
+  border: 1px solid #1e293b;
+  border-radius: 10px;
+  background: #0f172a;
+}
+
+.chat strong { display: block; margin-bottom: 8px; }
+
+.chat-messages {
+  max-height: 150px;
+  overflow-y: auto;
+  display: grid;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.chat-message {
+  display: flex;
+  gap: 8px;
+  color: #cbd5e1;
+  overflow-wrap: anywhere;
+}
+
+.chat-message code { color: #94a3b8; flex: 0 0 auto; }
+
+.chat-empty { color: #64748b; }
+
+.chat form {
+  display: flex;
+  gap: 8px;
+}
+
+.chat form input {
+  margin: 0;
+  flex: 1;
+}
+
+@media (max-width: 640px) {
+  .chat form { flex-direction: column; }
+}
