@@ -36,3 +36,24 @@ export async function accessRoom(id: string, password = ""): Promise<{ accessTok
   }
   return data;
 }
+
+export interface User { id: string; username: string; }
+export async function getMe(): Promise<User | null> {
+  const response = await fetch(\`${API_URL}\` + "/api/auth/me", { credentials: "include" });
+  if (!response.ok) return null;
+  const data = await response.json();
+  return data.user ?? null;
+}
+export async function register(username: string, password: string): Promise<User> {
+  const response = await fetch(\`${API_URL}\` + "/api/auth/register", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }) });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error === "USERNAME_TAKEN" ? "Имя уже занято" : "Не удалось зарегистрироваться");
+  return data;
+}
+export async function login(username: string, password: string): Promise<User> {
+  const response = await fetch(\`${API_URL}\` + "/api/auth/login", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }) });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error("Неверное имя или пароль");
+  return data;
+}
+export async function logout(): Promise<void> { await fetch(\`${API_URL}\` + "/api/auth/logout", { method: "POST", credentials: "include" }); }
