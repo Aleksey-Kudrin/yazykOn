@@ -58,6 +58,15 @@ jobs:
           SFU_REGRESSION_MAX_ROOM_DELTA: "0"
           SFU_REGRESSION_MAX_TRACK_DELTA: "0"
           SFU_REGRESSION_MAX_RESOURCE_GROWTH: "0.20"
+          SFU_CHURN_MAX_ACTIVE_DELTA: "1"
+          SFU_CHURN_MAX_ROOM_DELTA: "0"
+          SFU_CHURN_MAX_TRACK_DELTA: "0"
+          SFU_CHURN_MAX_RESOURCE_GROWTH: "0.20"
+          SFU_MULTI_ROOM_MAX_ACTIVE_DELTA: "3"
+          SFU_MULTI_ROOM_MAX_ROOM_DELTA: "3"
+          SFU_MULTI_ROOM_MAX_TRACK_DELTA: "6"
+          SFU_PERF_SAMPLES: "8"
+          SFU_PERF_SAMPLE_INTERVAL_MS: "500"
           SFU_ARTIFACT_DIR: artifacts
           COMPOSE_PROJECT_NAME: yazykon-sfu-it
           ROOM_ACCESS_SECRET: integration-secret
@@ -97,7 +106,6 @@ jobs:
           test -f e2e/artifacts/sfu-multi-room-failover-report.json || true
           test -f e2e/artifacts/sfu-redis-outage-report.json || true
           test -f e2e/artifacts/sfu-redis-cleanup-report.json || true
-          test -f e2e/artifacts/sfu-churn-leak-report.json || true
           test -f e2e/artifacts/sfu-churn-leak-report.json || true
       - name: Upload failover artifacts
         if: always()
