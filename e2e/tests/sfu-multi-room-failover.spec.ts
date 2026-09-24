@@ -44,7 +44,7 @@ async function runtimeMetrics(endpoint: string) {
     ];
     return Object.fromEntries(names.map(name => {
       const line = text.split("\n").find(value => value.startsWith(name + " "));
-      return [name, line ? Number(line.trim().split(/\\s+/)[1]) : null];
+      return [name, line ? Number(line.trim().split(/\s+/)[1]) : null];
     }));
   } catch {
     return {};
