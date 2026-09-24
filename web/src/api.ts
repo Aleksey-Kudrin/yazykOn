@@ -91,11 +91,19 @@ export interface RoomMessage {
   timestamp: number;
 }
 
-export async function getRoomMessages(id: string): Promise<RoomMessage[]> {
-  const response = await fetch(`${API_URL}/api/rooms/${encodeURIComponent(id)}/messages`, { credentials: "include" });
+export interface RoomMessagesPage {
+  messages: RoomMessage[];
+  hasMore: boolean;
+  nextBefore: string | null;
+}
+
+export async function getRoomMessages(id: string, before?: string, limit = 50): Promise<RoomMessagesPage> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (before) params.set("before", before);
+  const response = await fetch(`${API_URL}/api/rooms/${encodeURIComponent(id)}/messages?${params.toString()}`, { credentials: "include" });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error ?? "Не удалось получить историю чата");
-  return data.messages ?? [];
+  return { messages: data.messages ?? [], hasMore: Boolean(data.hasMore), nextBefore: data.nextBefore ?? null };
 }
 
 export async function sendRoomMessage(id: string, text: string): Promise<RoomMessage> {
