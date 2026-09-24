@@ -46,3 +46,8 @@ export async function redisPublish(channel: string, payload: unknown) {
   await redis.publish(channel, JSON.stringify(payload));
   return true;
 }
+
+export async function closeRedis() {
+  if (client?.isOpen) await client.quit();
+  client = null;
+}
