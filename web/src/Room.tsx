@@ -87,9 +87,12 @@ export function Room({ roomId }: RoomProps) {
           accessToken = access.accessToken;
         }
         if (accessToken) sessionStorage.setItem("yazykon-access-" + roomId, accessToken);
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        if (stopped) { stream.getTracks().forEach(t => t.stop()); return; }
-        localStream.current = stream;
+        let stream = localStream.current;
+        if (!stream) {
+          stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+          if (stopped) { stream.getTracks().forEach(t => t.stop()); return; }
+          localStream.current = stream;
+        }
         if (localVideo.current) localVideo.current.srcObject = stream;
 
         const iceServers: RTCIceServer[] = [];
@@ -112,6 +115,10 @@ export function Room({ roomId }: RoomProps) {
         const pc = new RTCPeerConnection({ iceServers });
         peer.current = pc;
         for (const track of stream.getTracks()) pc.addTrack(track, stream);
+        if (screenTrack.current) {
+          const videoSender = pc.getSenders().find(sender => sender.track?.kind === "video");
+          if (videoSender) await videoSender.replaceTrack(screenTrack.current);
+        }
 
         pc.ontrack = (event) => {
           const stream = event.streams[0] ?? new MediaStream([event.track]);
@@ -306,7 +313,7 @@ export function Room({ roomId }: RoomProps) {
           reconnectTimer.current = setTimeout(() => {
             if (stopped || reconnecting.current) return;
             reconnecting.current = true;
-            window.location.reload();
+            setReconnectNonce(value => value + 1);
           }, delay);
         };
       } catch (error) { console.error(error); setStatus("Нет доступа к камере или микрофону"); }
@@ -317,14 +324,23 @@ export function Room({ roomId }: RoomProps) {
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       socket.current?.close();
       peer.current?.close();
-      localStream.current?.getTracks().forEach(t => t.stop());
-      screenTrack.current?.stop();
-      screenTrack.current = null;
+      pendingIce.current = [];
+      pendingLocalIce.current = [];
       remoteStreams.current.clear();
       remoteOwners.current.clear();
       remoteTrackStreams.current.clear();
+      setRemotes([]);
     };
-  }, [roomId]);
+  }, [roomId, reconnectNonce]);
+
+  React.useEffect(() => () => {
+    if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+    socket.current?.close();
+    peer.current?.close();
+    localStream.current?.getTracks().forEach(t => t.stop());
+    screenTrack.current?.stop();
+    screenTrack.current = null;
+  }, []);
 
   function toggleMic() { const next = !mic; localStream.current?.getAudioTracks().forEach(t => t.enabled = next); setMic(next); }
   function toggleCamera() { const next = !camera; localStream.current?.getVideoTracks().forEach(t => t.enabled = next); setCamera(next); }
