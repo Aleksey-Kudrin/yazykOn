@@ -1,9 +1,8 @@
-import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, scryptSync, timingSafeEqual, randomUUID } from "node:crypto";
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";
 import { createServer } from "node:http";
-import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { attachSignaling } from "./signaling.js";
 import { createRoom, getRoom, verifyRoomPassword } from "./rooms.js";
@@ -65,10 +64,10 @@ async function currentUser(req: express.Request) {
 function requireScrypt(password: string, salt: string) { return scryptSync(password, salt, 32).toString("hex"); }
 function verifyScrypt(password: string, stored: string) { const [salt, expectedHex] = stored.split(":"); if (!salt || !expectedHex) return false; const actual=Buffer.from(requireScrypt(password,salt),"hex"); const expected=Buffer.from(expectedHex,"hex"); return actual.length===expected.length && timingSafeEqual(actual,expected); }
 
-function issueRoomAccessToken(roomId: string): string | null {
+function issueRoomAccessToken(roomId: string, userId = ""): string | null {
   if (!roomAccessSecret) return null;
   const expires = Math.floor(Date.now() / 1000) + roomAccessTtl;
-  const payload = Buffer.from(JSON.stringify({ roomId, exp: expires })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({ roomId, userId, exp: expires })).toString("base64url");
   const signature = createHmac("sha256", roomAccessSecret).update(payload).digest("base64url");
   return payload + "." + signature;
 }
@@ -167,8 +166,10 @@ app.post("/api/rooms", (req, res) => {
     res.status(400).json({ error: "INVALID_ROOM_PASSWORD" });
     return;
   }
+  const user = await currentUser(req);
+  if (!user) { res.status(401).json({ error: "AUTH_REQUIRED" }); return; }
   const room = createRoom(name, password);
-  const accessToken = issueRoomAccessToken(room.id);
+  const accessToken = issueRoomAccessToken(room.id, user.id);
   res.status(201).json({ ...room, accessToken });
 });
 
@@ -184,7 +185,9 @@ app.post("/api/rooms/:id/access", (req, res) => {
     res.status(401).json({ error: "INVALID_ROOM_PASSWORD" });
     return;
   }
-  const accessToken = issueRoomAccessToken(room.id);
+  const user = await currentUser(req);
+  if (!user) { res.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+  const accessToken = issueRoomAccessToken(room.id, user.id);
   if (!accessToken) { res.status(503).json({ error: "ROOM_ACCESS_NOT_CONFIGURED" }); return; }
   res.json({ accessToken });
 });
