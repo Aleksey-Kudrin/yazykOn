@@ -118,14 +118,15 @@ async function registerClient(client: Client) {
   return previous;
 }
 
-async function unregisterClient(client: Client) {
+async function unregisterClient(client: Client): Promise<"removed" | "stale" | "unavailable"> {
   const timer = heartbeatTimers.get(client.sessionId);
   if (timer) clearInterval(timer);
   heartbeatTimers.delete(client.sessionId);
-  if (!redisEnabled()) return;
-  await redisRemovePeer(client.roomId, client.peerId, NODE_ID, client.sessionId);
+  if (!redisEnabled()) return "removed";
+  const removal = await redisRemovePeer(client.roomId, client.peerId, NODE_ID, client.sessionId);
   const room = rooms.get(client.roomId);
   if (!room || room.size === 0) await redisUnsubscribe(redisRoomChannel(client.roomId));
+  return removal;
 }
 
 export function attachSignaling(server: HttpServer) {
@@ -232,15 +233,12 @@ export function attachSignaling(server: HttpServer) {
       }
 
       current.delete(client.peerId);
-      if (!client.replaced) {
+      if (current.size === 0) rooms.delete(client.roomId);
+      void unregisterClient(client).then(status => {
+        if (client.replaced || status === "stale") return;
         for (const other of current.values()) send(other.socket, { type: "peer-left", peerId: client.peerId });
-        if (current.size === 0) rooms.delete(client.roomId);
-        void publishRoomEvent(client.roomId, { type: "peer-left", peerId: client.peerId })
-          .finally(() => unregisterClient(client));
-      } else {
-        if (current.size === 0) rooms.delete(client.roomId);
-        void unregisterClient(client);
-      }
+        void publishRoomEvent(client.roomId, { type: "peer-left", peerId: client.peerId });
+      });
     });
   });
 
