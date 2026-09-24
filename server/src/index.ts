@@ -7,6 +7,7 @@ import { Pool } from "pg";
 import { attachSignaling } from "./signaling.js";
 import { closeRedis, getRedis, redisEnabled } from "./redis.js";
 import { BreakoutManager } from "./breakout/manager.js";
+import { validateCredentials } from "./security.js";
 
 type RoomRole = "host" | "cohost" | "member";
 
@@ -57,6 +58,9 @@ function isAllowedOrigin(origin: string | undefined) {
   if (!origin) return true;
   if (allowedOrigins.size === 0 && process.env.NODE_ENV !== "production") return true;
   return allowedOrigins.has(origin);
+}
+function normalizeLoginUsername(value: unknown) {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
 }
 const db = databaseUrl ? new Pool({ connectionString: databaseUrl }) : null;
 
@@ -210,11 +214,9 @@ app.get("/api/turn-credentials", (_req, res) => {
 
 app.post("/api/auth/register", async (req, res) => {
   if (!db) { res.status(503).json({ error: "DATABASE_NOT_CONFIGURED" }); return; }
-  const username = typeof req.body?.username === "string" ? req.body.username.trim().toLowerCase() : "";
-  const password = typeof req.body?.password === "string" ? req.body.password : "";
-  if (!/^[a-z0-9_.-]{3,32}$/.test(username) || password.length < 8 || password.length > 128) {
-    res.status(400).json({ error: "INVALID_CREDENTIALS" }); return;
-  }
+  const credentials = validateCredentials(req.body?.username, req.body?.password);
+  if (!credentials) { res.status(400).json({ error: "INVALID_CREDENTIALS" }); return; }
+  const { username, password } = credentials;
   try {
     const salt = randomBytes(16).toString("hex");
     const hash = requireScrypt(password, salt);
@@ -232,8 +234,9 @@ app.post("/api/auth/register", async (req, res) => {
 
 app.post("/api/auth/login", async (req, res) => {
   if (!db) { res.status(503).json({ error: "DATABASE_NOT_CONFIGURED" }); return; }
-  const username = typeof req.body?.username === "string" ? req.body.username.trim().toLowerCase() : "";
-  const password = typeof req.body?.password === "string" ? req.body.password : "";
+  const credentials = validateCredentials(req.body?.username, req.body?.password);
+  const username = credentials?.username ?? normalizeLoginUsername(req.body?.username);
+  const password = credentials?.password ?? "";
   const result = await db.query("SELECT id, username, password_hash FROM users WHERE username=$1", [username]);
   const row = result.rows[0];
   if (!row || !verifyScrypt(password, row.password_hash)) { res.status(401).json({ error:"INVALID_CREDENTIALS" }); return; }
