@@ -52,11 +52,6 @@ type ModerationCommand struct {
 	PeerID string `json:"peerId"`
 }
 
-type RoleUpdate struct {
-	UserID string `json:"userId"`
-	Role string `json:"role"`
-}
-
 type Peer struct {
 	id        string
 	userID    string
@@ -92,7 +87,14 @@ type PublishedTrack struct {
 }
 
 var (
-	upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
+	upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		if origin == "" { return true }
+		for _, allowed := range envList("WEB_ORIGINS") {
+			if origin == allowed { return true }
+		}
+		return false
+	}}
 	roomsMu  sync.Mutex
 	rooms    = map[string]*Room{}
 )
@@ -135,7 +137,7 @@ func getRoom(id string) *Room {
 func verifyRoomAccessToken(roomID, token string) (AccessClaims, bool) {
   var claims AccessClaims
   secret := os.Getenv("ROOM_ACCESS_SECRET")
-  if secret == "" || token == "" { return claims, secret == "" && token == "" }
+  if secret == "" || token == "" { return claims, false }
   parts := strings.Split(token, ".")
   if len(parts) != 2 { return claims, false }
   mac := hmac.New(sha256.New, []byte(secret))
@@ -412,27 +414,6 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 					negotiationFinished(me)
 				}
 			}
-		case "role-update":
-			var update RoleUpdate
-			if json.Unmarshal(msg.Data, &update) != nil || update.UserID == "" { continue }
-			if me.role != "host" { _ = send(me, Signal{Type: "error", Data: mustJSON(map[string]string{"code": "ROLE_UPDATE_DENIED"})}); continue }
-			if update.Role != "cohost" && update.Role != "member" { continue }
-			room.mu.RLock()
-			var target *Peer
-			for _, p := range room.peers { if p.userID == update.UserID { target = p; break } }
-			room.mu.RUnlock()
-			if target == nil { continue }
-			target.mu.Lock()
-			if target.role != "host" { target.role = update.Role }
-			newRole := target.role
-			target.mu.Unlock()
-			payload := mustJSON(map[string]string{"userId": target.userID, "role": newRole})
-			room.mu.RLock()
-			rolePeers := make([]*Peer, 0, len(room.peers))
-			for _, p := range room.peers { if !p.waiting { rolePeers = append(rolePeers, p) } }
-			room.mu.RUnlock()
-			for _, p := range rolePeers { _ = send(p, Signal{Type: "role-updated", PeerID: target.id, Data: payload}) }
-
 		case "moderate":
 			var cmd ModerationCommand
 			if json.Unmarshal(msg.Data, &cmd) != nil || cmd.Action == "" { continue }
