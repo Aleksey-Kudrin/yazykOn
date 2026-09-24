@@ -42,8 +42,16 @@ async function connect(page: import("@playwright/test").Page, userId: string, pe
     const ws = new WebSocket(endpoint.replace(/^http/, "ws") + "/ws");
     const queue: any[] = [];
     let waiter: ((value: any) => void) | undefined;
+    pc.onicecandidate = event => {
+      if (event.candidate && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "ice", roomId, data: event.candidate.toJSON() }));
+      }
+    };
     ws.onmessage = event => {
       const message = JSON.parse(event.data);
+      if (message.type === "ice" && message.data) {
+        void pc.addIceCandidate(message.data);
+      }
       if (waiter) { const resolve = waiter; waiter = undefined; resolve(message); }
       else queue.push(message);
     };
