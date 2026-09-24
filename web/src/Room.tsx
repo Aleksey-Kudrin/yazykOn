@@ -3,7 +3,7 @@ import { accessRoom, getRoom } from "./api";
 
 interface RoomProps { roomId: string; }
 type SignalMessage =
-  | { type: "joined"; roomId: string; peerId: string; data?: { peers: string[]; tracks?: number; hostId?: string; locked?: boolean } }
+  | { type: "joined"; roomId: string; peerId: string; data?: { peers: string[]; tracks?: number; hostId?: string; locked?: boolean; lobby?: boolean } }
   | { type: "peer-joined"; peerId: string }
   | { type: "peer-left"; peerId: string }
   | { type: "track-published"; peerId: string; data?: { trackId?: string } }
