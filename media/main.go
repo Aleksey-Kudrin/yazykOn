@@ -1,7 +1,10 @@
 package main
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"log"
@@ -27,6 +30,10 @@ type Signal struct {
 	RoomID string          `json:"roomId,omitempty"`
 	PeerID string          `json:"peerId,omitempty"`
 	Data   json.RawMessage `json:"data,omitempty"`
+}
+
+type JoinData struct {
+	AccessToken string `json:"accessToken"`
 }
 
 type ChatMessage struct {
@@ -111,6 +118,22 @@ func getRoom(id string) *Room {
 	return r
 }
 
+func verifyRoomAccessToken(roomID, token string) bool {
+  secret := os.Getenv("ROOM_ACCESS_SECRET")
+  if secret == "" || token == "" { return secret == "" && token == "" }
+  parts := strings.Split(token, ".")
+  if len(parts) != 2 { return false }
+  mac := hmac.New(sha256.New, []byte(secret))
+  _, _ = mac.Write([]byte(parts[0]))
+  expected, err := base64.RawURLEncoding.DecodeString(parts[1])
+  if err != nil || !hmac.Equal(mac.Sum(nil), expected) { return false }
+  payload, err := base64.RawURLEncoding.DecodeString(parts[0])
+  if err != nil { return false }
+  var claims struct { RoomID string `json:"roomId"`; Exp int64 `json:"exp"` }
+  if json.Unmarshal(payload, &claims) != nil || claims.RoomID != roomID || claims.Exp < time.Now().Unix() { return false }
+  return true
+}
+
 func send(p *Peer, msg Signal) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -145,8 +168,17 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := first.PeerID
-	if id == "" {
+	var join JoinData
+	if len(first.Data) > 0 && json.Unmarshal(first.Data, &join) != nil {
+		_ = conn.WriteJSON(Signal{Type: "error", Data: mustJSON(map[string]string{"code": "INVALID_JOIN"})})
+		return
+	}
+	if !verifyRoomAccessToken(first.RoomID, join.AccessToken) {
+		_ = conn.WriteJSON(Signal{Type: "error", Data: mustJSON(map[string]string{"code": "ROOM_ACCESS_DENIED"})})
+		return
+	}
+
+	id := first.PeerID	if id == "" {
 		id = newID()
 	}
 
