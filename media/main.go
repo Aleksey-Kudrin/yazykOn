@@ -737,9 +737,11 @@ func replacePeerSession(old *Peer, room *Room) {
 	}
 	delete(room.peers, old.id)
 	removedTracks := make([]string, 0)
+	removedTrackStates := make([]PublishedTrack, 0)
 	for id, track := range room.tracks {
 		if track.ownerID == old.id {
 			removedTracks = append(removedTracks, id)
+			removedTrackStates = append(removedTrackStates, *track)
 			delete(room.tracks, id)
 		}
 	}
