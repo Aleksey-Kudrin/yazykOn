@@ -81,50 +81,52 @@ export async function redisRegisterPeer(
   const redis = await getRedis();
   if (!redis) return null;
   const key = peerKey(roomId, peerId);
-  const previousRaw = await redis.get(key);
-  let previous: RedisPeerRecord | null = null;
-  if (previousRaw) {
-    try {
-      const value = JSON.parse(previousRaw) as Partial<RedisPeerRecord>;
-      if (value.nodeId && value.peerId && value.sessionId) {
-        previous = { nodeId: value.nodeId, peerId: value.peerId, sessionId: value.sessionId };
-      }
-    } catch { /* replace malformed registry entries */ }
-  }
-  await redis.set(key, JSON.stringify({ nodeId, peerId, sessionId }), { EX: ttlSeconds });
-  return previous;
+  const payload = JSON.stringify({ nodeId, peerId, sessionId });
+  const previousRaw = await redis.eval(
+    `local previous = redis.call("GET", KEYS[1])
+     redis.call("SET", KEYS[1], ARGV[1], "EX", ARGV[2])
+     return previous or ""`,
+    { keys: [key], arguments: [payload, String(ttlSeconds)] }
+  ) as string;
+  if (!previousRaw) return null;
+  try {
+    const value = JSON.parse(previousRaw) as Partial<RedisPeerRecord>;
+    if (value.nodeId && value.peerId && value.sessionId) {
+      return { nodeId: value.nodeId, peerId: value.peerId, sessionId: value.sessionId };
+    }
+  } catch { /* replace malformed registry entries */ }
+  return null;
 }
 
 export async function redisRefreshPeer(roomId: string, peerId: string, nodeId: string, sessionId: string, ttlSeconds = 60) {
   const redis = await getRedis();
   if (!redis) return false;
   const key = peerKey(roomId, peerId);
-  const raw = await redis.get(key);
-  if (!raw) return false;
-  try {
-    const value = JSON.parse(raw) as { nodeId?: string; sessionId?: string };
-    if (value.nodeId !== nodeId || value.sessionId !== sessionId) return false;
-  } catch {
-    return false;
-  }
-  await redis.expire(key, ttlSeconds);
-  return true;
+  const result = await redis.eval(
+    `local raw = redis.call("GET", KEYS[1])
+     if not raw then return 0 end
+     local ok, value = pcall(cjson.decode, raw)
+     if not ok or value.nodeId ~= ARGV[1] or value.sessionId ~= ARGV[2] then return 0 end
+     redis.call("EXPIRE", KEYS[1], ARGV[3])
+     return 1`,
+    { keys: [key], arguments: [nodeId, sessionId, String(ttlSeconds)] }
+  );
+  return Number(result) === 1;
 }
 
 export async function redisRemovePeer(roomId: string, peerId: string, nodeId: string, sessionId: string) {
   const redis = await getRedis();
   if (!redis) return false;
   const key = peerKey(roomId, peerId);
-  const raw = await redis.get(key);
-  if (!raw) return false;
-  try {
-    const value = JSON.parse(raw) as { nodeId?: string };
-    if (value.nodeId !== nodeId) return false;
-  } catch {
-    return false;
-  }
-  await redis.del(key);
-  return true;
+  const result = await redis.eval(
+    `local raw = redis.call("GET", KEYS[1])
+     if not raw then return 0 end
+     local ok, value = pcall(cjson.decode, raw)
+     if not ok or value.nodeId ~= ARGV[1] or value.sessionId ~= ARGV[2] then return 0 end
+     return redis.call("DEL", KEYS[1])`,
+    { keys: [key], arguments: [nodeId, sessionId] }
+  );
+  return Number(result) === 1;
 }
 
 export async function redisListPeers(roomId: string) {
