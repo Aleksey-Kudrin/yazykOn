@@ -115,91 +115,90 @@ async function waitForFrame(page: import("@playwright/test").Page) {
   });
 }
 
-test("two participants recover remote media after SFU failover", async ({ browser }) => {
+test("two participants recover remote media through repeated SFU failover cycles", async ({ browser }) => {
   test.skip(!process.env.SFU_FAILOVER_LIVE, "Set SFU_FAILOVER_LIVE=1 for the live Docker failover run");
 
   const pages = await Promise.all([
     browser.newPage({ permissions: ["camera", "microphone"] }),
     browser.newPage({ permissions: ["camera", "microphone"] })
   ]);
-  await Promise.all(pages.map(page => page.goto(primary + "/health")));
 
-  const first = await connect(pages[0], primary, "p1");
-  const second = await connect(pages[1], primary, "p2");
-  expect(second.remotePeers).toContain(first.peerId);
+  const initial = await Promise.all(pages.map(page => page.goto(primary + "/health")));
+  expect(initial.every(response => response?.ok())).toBeTruthy();
 
-  await waitForFrame(pages[1]);
+  let peerIds = ["", ""];
+  let endpoint = primary;
+  let stoppedService = "sfu-primary";
 
-  execFileSync("docker", ["compose", "-f", composeFile, "stop", "sfu-primary"], { stdio: "inherit" });
-  await new Promise(resolve => setTimeout(resolve, ttlMs + 2000));
+  try {
+    const first = await connect(pages[0], endpoint, "p1");
+    const second = await connect(pages[1], endpoint, "p2");
+    peerIds = [first.peerId, second.peerId];
+    expect(second.remotePeers).toContain(first.peerId);
+    await Promise.all(pages.map(page => waitForFrame(page)));
 
-  const recovered = await Promise.all([
-    connect(pages[0], secondary, "p1", first.peerId),
-    connect(pages[1], secondary, "p2", second.peerId)
-  ]);
+    for (let cycle = 0; cycle < 4; cycle++) {
+      const nextEndpoint = endpoint === primary ? secondary : primary;
+      stoppedService = endpoint === primary ? "sfu-primary" : "sfu-secondary";
 
-  expect(recovered[0].peerId).toBe(first.peerId);
-  expect(recovered[1].peerId).toBe(second.peerId);
-  expect(recovered[0].remotePeers).toContain(second.peerId);
-  expect(recovered[1].remotePeers).toContain(first.peerId);
+      const startedAt = Date.now();
+      execFileSync("docker", ["compose", "-f", composeFile, "stop", stoppedService], { stdio: "inherit" });
+      await new Promise(resolve => setTimeout(resolve, ttlMs + 2000));
 
-  await Promise.all(recovered.map((_, index) => waitForFrame(pages[index])));
+      const ownerEndpoint = nextEndpoint;
+      const health = await fetch(ownerEndpoint + "/health");
+      expect(health.ok).toBeTruthy();
 
-  const recoveredFrameState = await Promise.all(pages.map(page => page.evaluate(() =>
-    [...document.querySelectorAll("video")].map(video => ({ readyState: video.readyState, width: video.videoWidth, height: video.videoHeight }))
-  )));
-  for (const videos of recoveredFrameState) {
-    expect(videos.some(video => video.readyState >= 2 && video.width > 0 && video.height > 0)).toBeTruthy();
-  }
+      const recovered = await Promise.all([
+        connect(pages[0], nextEndpoint, "p1", peerIds[0]),
+        connect(pages[1], nextEndpoint, "p2", peerIds[1])
+      ]);
 
-  const connectionStates = await Promise.all(pages.map(page => page.evaluate(() =>
-    ((window as any).__remoteFailoverConnectionStates ?? []).map((pc: RTCPeerConnection) => pc.connectionState)
-  )));
-  expect(connectionStates.every(states => states.some(state => state === "connected" || state === "completed"))).toBeTruthy();
+      expect(recovered[0].peerId).toBe(peerIds[0]);
+      expect(recovered[1].peerId).toBe(peerIds[1]);
+      expect(recovered[0].remotePeers).toContain(peerIds[1]);
+      expect(recovered[1].remotePeers).toContain(peerIds[0]);
 
-  const mediaState = await Promise.all(pages.map(page => page.evaluate(() =>
-    [...document.querySelectorAll("video")].map(video => ({
-      readyState: video.readyState,
-      width: video.videoWidth,
-      height: video.videoHeight
-    }))
-  )));
+      await Promise.all(pages.map(page => waitForFrame(page)));
 
-  for (const videos of mediaState) {
-    expect(videos.some(video => video.readyState >= 2 && video.width > 0 && video.height > 0)).toBeTruthy();
-  }
+      const mediaState = await Promise.all(pages.map(page => page.evaluate(() =>
+        [...document.querySelectorAll("video")].map(video => ({
+          readyState: video.readyState,
+          width: video.videoWidth,
+          height: video.videoHeight
+        }))
+      )));
+      for (const videos of mediaState) {
+        expect(videos.some(video => video.readyState >= 2 && video.width > 0 && video.height > 0)).toBeTruthy();
+      }
 
-  execFileSync("docker", ["compose", "-f", composeFile, "start", "sfu-primary"], { stdio: "inherit" });
-  for (let attempt = 0; attempt < 30; attempt++) {
+      const connectionStates = await Promise.all(pages.map(page => page.evaluate(() =>
+        ((window as any).__remoteFailoverConnectionStates ?? []).map((pc: RTCPeerConnection) => pc.connectionState)
+      )));
+      expect(connectionStates.every(states => states.some(state => state === "connected" || state === "completed"))).toBeTruthy();
+
+      const recoveryMs = Date.now() - startedAt;
+      expect(recoveryMs).toBeLessThan(Number(process.env.SFU_FAILOVER_SLA_MS ?? 15000));
+
+      if (cycle < 3) {
+        execFileSync("docker", ["compose", "-f", composeFile, "start", stoppedService], { stdio: "inherit" });
+        const restartedEndpoint = endpoint;
+        for (let attempt = 0; attempt < 30; attempt++) {
+          try {
+            const response = await fetch(restartedEndpoint + "/health");
+            if (response.ok) break;
+          } catch {}
+          await new Promise(resolve => setTimeout(resolve, 500));
+          if (attempt === 29) throw new Error(stoppedService + " did not recover");
+        }
+      }
+
+      endpoint = nextEndpoint;
+    }
+  } finally {
     try {
-      const health = await fetch(primary + "/health");
-      if (health.ok) break;
+      execFileSync("docker", ["compose", "-f", composeFile, "start", "sfu-primary", "sfu-secondary"], { stdio: "inherit" });
     } catch {}
-    await new Promise(resolve => setTimeout(resolve, 500));
-    if (attempt === 29) throw new Error("SFU primary did not recover");
+    await Promise.all(pages.map(page => page.close()));
   }
-
-  const roundTrip = await Promise.all([
-    connect(pages[0], primary, "p1", recovered[0].peerId),
-    connect(pages[1], primary, "p2", recovered[1].peerId)
-  ]);
-
-  expect(roundTrip[0].peerId).toBe(first.peerId);
-  expect(roundTrip[1].peerId).toBe(second.peerId);
-  expect(roundTrip[0].remotePeers).toContain(second.peerId);
-  expect(roundTrip[1].remotePeers).toContain(first.peerId);
-  await Promise.all(roundTrip.map((_, index) => waitForFrame(pages[index])));
-
-  const roundTripMedia = await Promise.all(pages.map(page => page.evaluate(() =>
-    [...document.querySelectorAll("video")].map(video => ({
-      readyState: video.readyState,
-      width: video.videoWidth,
-      height: video.videoHeight
-    }))
-  )));
-  for (const videos of roundTripMedia) {
-    expect(videos.some(video => video.readyState >= 2 && video.width > 0 && video.height > 0)).toBeTruthy();
-  }
-
-  await Promise.all(pages.map(page => page.close()));
 });
