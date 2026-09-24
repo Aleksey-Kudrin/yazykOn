@@ -1,0 +1,19 @@
+name: SFU failover auto-run
+
+on:
+  push:
+    branches:
+      - test/sfu-chaos-failover
+
+permissions:
+  actions: write
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch SFU failover integration
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run sfu-failover.yml --repo "${{ github.repository }}" --ref "${{ github.ref_name }}"
