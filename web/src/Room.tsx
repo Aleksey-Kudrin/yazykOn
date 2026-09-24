@@ -75,6 +75,16 @@ export function Room({ roomId }: RoomProps) {
           const stream = event.streams[0] ?? new MediaStream([event.track]);
           const id = stream.id || event.track.id;
           remoteStreams.current.set(id, stream);
+          if (event.track.kind === "video") {
+            event.track.onended = () => {
+              const current = remoteStreams.current.get(id);
+              if (current) {
+                current.removeTrack(event.track);
+                if (current.getTracks().length === 0) remoteStreams.current.delete(id);
+                setRemotes(Array.from(remoteStreams.current, ([streamId, remote]) => ({ id: streamId, stream: remote })));
+              }
+            };
+          }
           setRemotes(Array.from(remoteStreams.current, ([streamId, remote]) => ({ id: streamId, stream: remote })));
         };
         pc.onconnectionstatechange = () => {
@@ -125,7 +135,18 @@ export function Room({ roomId }: RoomProps) {
             return;
           }
           if (message.type === "peer-left") {
-            remoteStreams.current.delete(message.peerId);
+            for (const [trackId, owner] of remoteOwners.current) {
+              if (owner === message.peerId) {
+                const streamId = remoteTrackStreams.current.get(trackId);
+                if (streamId) {
+                  const remote = remoteStreams.current.get(streamId);
+                  if (remote) remote.getTracks().filter(track => track.id === trackId).forEach(track => remote.removeTrack(track));
+                  if (remote && remote.getTracks().length === 0) remoteStreams.current.delete(streamId);
+                }
+                remoteOwners.current.delete(trackId);
+                remoteTrackStreams.current.delete(trackId);
+              }
+            }
             setRemotes(Array.from(remoteStreams.current, ([id, stream]) => ({ id, stream })));
             setParticipants(current => current.filter(id => id !== message.peerId));
             setStatus("Участник вышел");
