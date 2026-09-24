@@ -111,18 +111,19 @@ export async function redisRefreshPeer(roomId: string, peerId: string, nodeId: s
      return 1`,
     { keys: [key], arguments: [nodeId, sessionId, String(ttlSeconds)] }
   );
-  return Number(result) === 1;
+  const code = Number(result);
+  return code === 1 ? "removed" : "stale";
 }
 
-export async function redisRemovePeer(roomId: string, peerId: string, nodeId: string, sessionId: string) {
+export async function redisRemovePeer(roomId: string, peerId: string, nodeId: string, sessionId: string): Promise<"removed" | "stale" | "unavailable"> {
   const redis = await getRedis();
-  if (!redis) return false;
+  if (!redis) return "unavailable";
   const key = peerKey(roomId, peerId);
   const result = await redis.eval(
     `local raw = redis.call("GET", KEYS[1])
-     if not raw then return 0 end
+     if not raw then return 2 end
      local ok, value = pcall(cjson.decode, raw)
-     if not ok or value.nodeId ~= ARGV[1] or value.sessionId ~= ARGV[2] then return 0 end
+     if not ok or value.nodeId ~= ARGV[1] or value.sessionId ~= ARGV[2] then return 2 end
      return redis.call("DEL", KEYS[1])`,
     { keys: [key], arguments: [nodeId, sessionId] }
   );
