@@ -617,7 +617,7 @@ app.patch("/api/rooms/:id/members/:userId", async (req, res) => {
   void writeAuditEvent({ userId: user.id, roomId, action: "room.member.role_change", targetUserId: req.params.userId, ip: requestIp(req) });
   if (mediaControlSecret) {
     try {
-      await fetch(mediaControlUrl.replace(/\\/$/, "") + "/control/role", {
+      await fetch(mediaControlUrl.replace(/\/$/, "") + "/control/role", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": "Bearer " + mediaControlSecret },
         body: JSON.stringify({ roomId, userId: req.params.userId, role })
