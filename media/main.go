@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/pion/ice/v4"
@@ -26,6 +27,10 @@ type Signal struct {
 	RoomID string          `json:"roomId,omitempty"`
 	PeerID string          `json:"peerId,omitempty"`
 	Data   json.RawMessage `json:"data,omitempty"`
+}
+
+type ChatMessage struct {
+	Text string `json:"text"`
 }
 
 type Peer struct {
@@ -122,6 +127,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close()
+	conn.SetReadLimit(16 << 10)
 
 	var first Signal
 	if err := conn.ReadJSON(&first); err != nil || first.Type != "join" || first.RoomID == "" {
@@ -280,6 +286,29 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 					flushPendingICE(me)
 					negotiationFinished(me)
 				}
+			}
+		case "chat":
+			var chat ChatMessage
+			if err := json.Unmarshal(msg.Data, &chat); err != nil {
+				continue
+			}
+			chat.Text = strings.TrimSpace(chat.Text)
+			if chat.Text == "" {
+				continue
+			}
+			if len([]rune(chat.Text)) > 2000 {
+				_ = send(me, Signal{Type: "error", Data: mustJSON(map[string]string{"code": "CHAT_TOO_LARGE"})})
+				continue
+			}
+			payload := mustJSON(map[string]any{"text": chat.Text, "timestamp": time.Now().UnixMilli()})
+			room.mu.RLock()
+			chatPeers := make([]*Peer, 0, len(room.peers))
+			for _, p := range room.peers {
+				chatPeers = append(chatPeers, p)
+			}
+			room.mu.RUnlock()
+			for _, target := range chatPeers {
+				_ = send(target, Signal{Type: "chat", PeerID: me.id, Data: payload})
 			}
 		case "ice":
 			var candidate webrtc.ICECandidateInit
