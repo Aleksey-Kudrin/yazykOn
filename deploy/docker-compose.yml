@@ -4,8 +4,10 @@ services:
       context: ../server
     restart: unless-stopped
     environment:
+      NODE_ENV: production
       PORT: 3000
-      DATABASE_URL: postgres://yazykon:yazykon@postgres:5432/yazykon
+      DATABASE_URL: postgres://yazykon:${POSTGRES_PASSWORD:-CHANGE_ME}@postgres:5432/yazykon
+      WEB_ORIGINS: ${WEB_ORIGINS:-}
       TURN_SECRET: ${TURN_SECRET:-}
       TURN_REALM: ${TURN_REALM:-yazykon.local}
       TURN_URL: ${TURN_URL:-}
@@ -14,6 +16,7 @@ services:
       ROOM_ACCESS_TTL: ${ROOM_ACCESS_TTL:-86400}
       MEDIA_CONTROL_URL: ${MEDIA_CONTROL_URL:-http://media:4000}
       MEDIA_CONTROL_SECRET: ${MEDIA_CONTROL_SECRET:-}
+      WEB_ORIGINS: ${WEB_ORIGINS:-}
     expose:
       - "3000"
     depends_on:
