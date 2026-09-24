@@ -2,6 +2,12 @@ import type { Server as HttpServer } from "node:http";
 import { randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 
+function allowedOrigin(origin: string | undefined) {
+  if (!origin) return true;
+  const origins = (process.env.WEB_ORIGINS ?? "").split(",").map(value => value.trim()).filter(Boolean);
+  return origins.length > 0 && origins.includes(origin);
+}
+
 interface Client {
   socket: WebSocket;
   roomId: string;
@@ -24,7 +30,11 @@ function send(socket: WebSocket, message: unknown) {
 }
 
 export function attachSignaling(server: HttpServer) {
-  const wss = new WebSocketServer({ server, path: "/ws" });
+  const wss = new WebSocketServer({
+    server,
+    path: "/ws",
+    verifyClient: ({ origin }) => allowedOrigin(origin)
+  });
 
   wss.on("connection", (socket) => {
     let client: Client | undefined;
