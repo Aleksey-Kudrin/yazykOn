@@ -1,5 +1,5 @@
 import React from "react";
-import { accessRoom, getRoom } from "./api";
+import { accessRoom, getRoom, getRoomMembers, setRoomMemberRole, type RoomMember } from "./api";
 
 interface RoomProps { roomId: string; }
 type SignalMessage =
@@ -58,6 +58,7 @@ export function Room({ roomId }: RoomProps) {
   const screenTrack = React.useRef<MediaStreamTrack | null>(null);
   const [chat, setChat] = React.useState<Array<{ peerId: string; text: string; timestamp: number }>>([]);
   const [chatText, setChatText] = React.useState("");
+  const [members, setMembers] = React.useState<RoomMember[]>([]);
 
   React.useEffect(() => {
     let stopped = false;
@@ -313,6 +314,10 @@ export function Room({ roomId }: RoomProps) {
     }
   }
 
+  async function refreshMembers() { try { setMembers(await getRoomMembers(roomId)); } catch { setMembers([]); } }
+
+  async function changeMemberRole(userId: string, role: "cohost" | "member") { try { await setRoomMemberRole(roomId, userId, role); await refreshMembers(); setStatus("Роль участника изменена"); } catch { setStatus("Не удалось изменить роль"); } }
+
   function muteParticipant(peerId: string) {
     const ws = socket.current;
     if (!ws || ws.readyState !== WebSocket.OPEN || hostId !== selfId) return;
@@ -332,6 +337,8 @@ export function Room({ roomId }: RoomProps) {
   }
 
   function toggleLobby() { moderate(lobby ? "lobby-off" : "lobby-on"); }
+
+  React.useEffect(() => { if (hostId === selfId) void refreshMembers(); }, [hostId, selfId, roomId]);
 
   function approveWaiting(peerId: string) { setWaitingPeers(current => current.filter(id => id !== peerId)); moderate("approve", peerId); }
   function denyWaiting(peerId: string) { setWaitingPeers(current => current.filter(id => id !== peerId)); moderate("deny", peerId); }
@@ -367,7 +374,7 @@ export function Room({ roomId }: RoomProps) {
       <strong>Участники ({participants.length})</strong>
       {hostId === selfId && <div className="participant-controls"><button type="button" onClick={toggleLobby}>{lobby ? "🚪 Выключить Lobby" : "🚪 Включить Lobby"}</button>{roomLocked ? null : null}</div>}
       {hostId === selfId && waitingPeers.length > 0 && <div className="lobby-waiting"><strong>Ожидают входа ({waitingPeers.length})</strong>{waitingPeers.map(id => <div key={id} className="participant"><code>{id.slice(0, 8)}</code><button type="button" onClick={() => approveWaiting(id)}>Разрешить вход</button><button type="button" onClick={() => denyWaiting(id)}>Отклонить</button></div>)}</div>}
-      {participants.map(id => <div key={id} className="participant">{id === selfId ? "Вы" : "Участник"} <code>{id.slice(0, 8)}</code>{id === hostId ? " • ведущий" : ""}{hostId === selfId && id !== selfId ? <><button type="button" onClick={() => muteParticipant(id)}>Микрофон</button><button type="button" onClick={() => removeParticipant(id)}>Удалить</button></> : null}</div>)}
+      {participants.map(id => { const member = members.find(item => item.id === id); return <div key={id} className="participant">{id === selfId ? "Вы" : member?.username ?? "Участник"} <code>{id.slice(0, 8)}</code>{member?.role === "host" || id === hostId ? " • ведущий" : member?.role === "cohost" ? " • со-ведущий" : ""}{hostId === selfId && id !== selfId ? <><button type="button" onClick={() => muteParticipant(id)}>Микрофон</button><button type="button" onClick={() => removeParticipant(id)}>Удалить</button>{member?.role === "cohost" ? <button type="button" onClick={() => changeMemberRole(member.id, "member")}>Снять со-ведущего</button> : <button type="button" onClick={() => changeMemberRole(member?.id ?? "", "cohost")} disabled={!member}>Сделать со-ведущим</button>}</> : null}</div>; })}
       {hostId === selfId && <button type="button" onClick={() => toggleRoomLock()}>{roomLocked ? "🔓 Открыть комнату" : "🔒 Заблокировать комнату"}</button>}
     </aside>
     <section className="chat">
