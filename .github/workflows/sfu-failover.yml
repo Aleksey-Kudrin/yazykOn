@@ -1,6 +1,9 @@
 name: SFU failover integration
 
 on:
+  push:
+    branches:
+      - test/sfu-chaos-failover
   workflow_dispatch:
 
 jobs:
