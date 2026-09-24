@@ -15,8 +15,8 @@ services:
     expose:
       - "4000"
     ports:
-      - "4000:4000/udp"
       - "4000:4000/tcp"
+      - "50000-50100:50000-50100/udp"
 
   web:
     build:
