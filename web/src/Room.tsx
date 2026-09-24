@@ -79,6 +79,9 @@ export function Room({ roomId }: RoomProps) {
   const connectionGeneration = React.useRef(0);
   const [chat, setChat] = React.useState<ChatMessage[]>([]);
   const [chatText, setChatText] = React.useState("");
+  const [chatHasMore, setChatHasMore] = React.useState(false);
+  const [chatBefore, setChatBefore] = React.useState<string | null>(null);
+  const [chatLoading, setChatLoading] = React.useState(false);
   const [members, setMembers] = React.useState<RoomMember[]>([]);
   const selfRole = participants.find(participant => participant.peerId === selfId)?.role;
   const canModerate = hostId === selfId || selfRole === "cohost";
@@ -90,7 +93,7 @@ export function Room({ roomId }: RoomProps) {
     async function start() {
       try {
         const room = await getRoom(roomId);
-        try { setChat(current => mergeChatMessages(current, await getRoomMessages(roomId))); } catch (error) { console.warn("chat history unavailable", error); }
+        try { const page = await getRoomMessages(roomId); setChat(current => mergeChatMessages(current, page.messages)); setChatHasMore(page.hasMore); setChatBefore(page.nextBefore); } catch (error) { console.warn("chat history unavailable", error); }
         let accessToken = sfuAccessToken ?? sessionStorage.getItem("yazykon-access-" + sfuRoomId);
         if (sfuRoomId === roomId && accessToken) {
           try {
@@ -592,6 +595,21 @@ export function Room({ roomId }: RoomProps) {
     ws.send(JSON.stringify({ type: "moderate", roomId, data: { action: roomLocked ? "unlock" : "lock" } }));
   }
 
+  async function loadOlderChat() {
+    if (chatLoading || !chatHasMore || !chatBefore) return;
+    setChatLoading(true);
+    try {
+      const page = await getRoomMessages(roomId, chatBefore);
+      setChat(current => mergeChatMessages(current, page.messages, 500));
+      setChatHasMore(page.hasMore);
+      setChatBefore(page.nextBefore);
+    } catch {
+      setStatus("Не удалось загрузить старые сообщения");
+    } finally {
+      setChatLoading(false);
+    }
+  }
+
   async function sendChat(event: React.FormEvent) {
     event.preventDefault();
     const text = chatText.trim();
@@ -656,6 +674,7 @@ export function Room({ roomId }: RoomProps) {
     <section className="chat">
       <strong>Чат</strong>
       <div className="chat-messages">
+        {chatHasMore && <button type="button" onClick={() => void loadOlderChat()} disabled={chatLoading}>{chatLoading ? "Загрузка…" : "Загрузить старые сообщения"}</button>}
         {!chat.length && <span className="chat-empty">Сообщений пока нет</span>}
         {chat.map((message, index) => <div key={message.timestamp + "-" + index} className="chat-message"><code>{message.userId && message.userId === participants.find(item => item.peerId === selfId)?.userId ? "Вы" : message.username ?? (message.peerId ? message.peerId.slice(0, 8) : "Участник")}</code><span>{message.text}</span></div>)}
       </div>
