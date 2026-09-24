@@ -26,14 +26,15 @@ type SignalMessage =
   | { type: "lobby-on" }
   | { type: "lobby-off" };
 
-function mediaUrl() {
-  const configured = import.meta.env.VITE_MEDIA_URL;
-  if (configured) {
-    const url = new URL(configured, window.location.origin);
+function mediaUrls() {
+  const configured = import.meta.env.VITE_MEDIA_URLS || import.meta.env.VITE_MEDIA_URL;
+  const values = configured ? String(configured).split(",").map(value => value.trim()).filter(Boolean) : [];
+  if (!values.length) values.push(`${window.location.protocol === "https:" ? "ws:" : "ws:"}//${window.location.hostname}:4000`);
+  return values.map(value => {
+    const url = new URL(value, window.location.origin);
     const basePath = url.pathname.replace(/\/$/, "");
     return `${url.protocol === "https:" ? "wss:" : "ws:"}//${url.host}${basePath}/ws`;
-  }
-  return `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.hostname}:4000/ws`;
+  });
 }
 
 export function Room({ roomId }: RoomProps) {
@@ -77,6 +78,9 @@ export function Room({ roomId }: RoomProps) {
   const reconnectAttempt = React.useRef(0);
   const reconnecting = React.useRef(false);
   const connectionGeneration = React.useRef(0);
+  const selfIdRef = React.useRef("");
+  const identityRoomRef = React.useRef<string | null>(null);
+  const mediaEndpointRef = React.useRef(0);
   const [chat, setChat] = React.useState<ChatMessage[]>([]);
   const [chatText, setChatText] = React.useState("");
   const [chatHasMore, setChatHasMore] = React.useState(false);
@@ -92,6 +96,11 @@ export function Room({ roomId }: RoomProps) {
     const generation = ++connectionGeneration.current;
     async function start() {
       try {
+        if (identityRoomRef.current !== sfuRoomId) {
+          identityRoomRef.current = sfuRoomId;
+          selfIdRef.current = "";
+          setSelfId("");
+        }
         const room = await getRoom(roomId);
         try { const page = await getRoomMessages(roomId); setChat(current => mergeChatMessages(current, page.messages)); setChatHasMore(page.hasMore); setChatBefore(page.nextBefore); } catch (error) { console.warn("chat history unavailable", error); }
         let accessToken = sfuAccessToken ?? sessionStorage.getItem("yazykon-access-" + sfuRoomId);
@@ -239,14 +248,16 @@ export function Room({ roomId }: RoomProps) {
         };
 
         if (stopped || generation !== connectionGeneration.current) { pc.close(); return; }
-        const ws = new WebSocket(mediaUrl());
+        const endpoints = mediaUrls();
+        const endpointIndex = mediaEndpointRef.current % endpoints.length;
+        const ws = new WebSocket(endpoints[endpointIndex]);
         socket.current = ws;
         ws.onopen = async () => {
           if (stopped || generation !== connectionGeneration.current) { ws.close(); return; }
           reconnectAttempt.current = 0;
           reconnecting.current = false;
-          setStatus("Подключено к языкOn SFU");
-          ws.send(JSON.stringify({ type: "join", roomId: sfuRoomId, data: { accessToken } }));
+          setStatus(`Подключено к языкOn SFU ${endpointIndex + 1}/${endpoints.length}`);
+          ws.send(JSON.stringify({ type: "join", roomId: sfuRoomId, peerId: selfIdRef.current || undefined, data: { accessToken, reconnect: Boolean(selfIdRef.current) } }));
           for (const candidate of pendingLocalIce.current) {
             ws.send(JSON.stringify({ type: "ice", roomId: sfuRoomId, data: candidate }));
           }
@@ -277,6 +288,7 @@ export function Room({ roomId }: RoomProps) {
           const message = JSON.parse(event.data) as SignalMessage;
           if (message.type === "joined") {
             const data = message.data;
+            selfIdRef.current = message.peerId;
             setSelfId(message.peerId);
             setParticipants([participantFromMeta(message.peerId, data?.peerMeta?.[message.peerId]), ...(data?.peers ?? []).map(peerId => participantFromMeta(peerId, data?.peerMeta?.[peerId]))]);
             setHostId(data?.hostId ?? message.peerId);
@@ -417,8 +429,9 @@ export function Room({ roomId }: RoomProps) {
           if (stopped || generation !== connectionGeneration.current || socket.current !== ws) return;
           setConnected(false);
           const attempt = Math.min(reconnectAttempt.current++, 6);
+          mediaEndpointRef.current = (endpointIndex + 1) % endpoints.length;
           const delay = Math.min(30000, 1000 * 2 ** attempt);
-          setStatus(`SFU отключён — переподключение через ${Math.ceil(delay / 1000)} с…`);
+          setStatus(`SFU ${endpointIndex + 1}/${endpoints.length} отключён — переключение на SFU ${(mediaEndpointRef.current % endpoints.length) + 1} через ${Math.ceil(delay / 1000)} с…`);
           if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
           reconnectTimer.current = setTimeout(() => {
             if (stopped || reconnecting.current) return;
