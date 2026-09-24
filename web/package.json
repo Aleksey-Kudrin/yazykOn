@@ -1,6 +1,6 @@
 {
   "name": "yazykon-web",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@jitsi/react-sdk": "^1.4.4",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },
