@@ -315,7 +315,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 	} else {
 		b, _ := json.Marshal(map[string]any{"peers": peerIDs(others), "tracks": len(tracks), "hostId": hostID, "locked": locked, "lobby": lobby})
 		_ = send(me, Signal{Type: "joined", RoomID: room.id, PeerID: id, Data: b})
-		for _, other := range others { _ = send(other, Signal{Type: "peer-joined", PeerID: id}) }
+		for _, other := range others { _ = send(other, Signal{Type: "peer-joined", PeerID: id, Data: mustJSON(map[string]string{"userId": me.userID, "role": me.role})}) }
 	}
 	// The browser's initial offer/answer establishes the connection. Existing
 	// remote tracks are already attached above and are included in that answer.
