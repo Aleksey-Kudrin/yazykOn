@@ -2,9 +2,10 @@ import React from "react";
 import { accessRoom, getRoom, getRoomMembers, setRoomMemberRole, type RoomMember } from "./api";
 
 interface RoomProps { roomId: string; }
+type Participant = { peerId: string; userId?: string; role?: string };
 type SignalMessage =
   | { type: "joined"; roomId: string; peerId: string; data?: { peers: string[]; tracks?: number; hostId?: string; locked?: boolean; lobby?: boolean } }
-  | { type: "peer-joined"; peerId: string }
+  | { type: "peer-joined"; peerId: string; data?: { userId?: string; role?: string } }
   | { type: "peer-left"; peerId: string }
   | { type: "track-published"; peerId: string; data?: { trackId?: string } }
   | { type: "track-removed"; peerId: string; data?: { trackId?: string } }
@@ -47,7 +48,7 @@ export function Room({ roomId }: RoomProps) {
   const [connected, setConnected] = React.useState(false);
   const [mic, setMic] = React.useState(true);
   const [camera, setCamera] = React.useState(true);
-  const [participants, setParticipants] = React.useState<string[]>([]);
+  const [participants, setParticipants] = React.useState<Participant[]>([]);
   const [selfId, setSelfId] = React.useState("");
   const [roomLocked, setRoomLocked] = React.useState(false);
   const [lobby, setLobby] = React.useState(false);
@@ -157,7 +158,7 @@ export function Room({ roomId }: RoomProps) {
           if (message.type === "joined") {
             const data = message.data;
             setSelfId(message.peerId);
-            setParticipants([message.peerId, ...(data?.peers ?? [])]);
+            setParticipants([ { peerId: message.peerId }, ...(data?.peers ?? []).map(peerId => ({ peerId })) ]);
             setHostId(data?.hostId ?? message.peerId);
             setRoomLocked(Boolean(data?.locked));
             setLobby(Boolean(data?.lobby));
@@ -185,7 +186,7 @@ export function Room({ roomId }: RoomProps) {
           if (message.type === "lobby-on") { setLobby(true); return; }
           if (message.type === "lobby-off") { setLobby(false); setWaitingPeers([]); return; }
           if (message.type === "peer-joined") {
-            setParticipants(current => current.includes(message.peerId) ? current : [...current, message.peerId]);
+            setParticipants(current => current.some(p => p.peerId === message.peerId) ? current : [...current, { peerId: message.peerId, userId: message.data?.userId, role: message.data?.role }]);
             setStatus("Новый участник подключился");
             return;
           }
@@ -203,7 +204,7 @@ export function Room({ roomId }: RoomProps) {
               }
             }
             setRemotes(Array.from(remoteStreams.current, ([id, stream]) => ({ id, stream })));
-            setParticipants(current => current.filter(id => id !== message.peerId));
+            setParticipants(current => current.filter(p => p.peerId !== message.peerId));
             setStatus("Участник вышел");
             return;
           }
@@ -374,7 +375,7 @@ export function Room({ roomId }: RoomProps) {
       <strong>Участники ({participants.length})</strong>
       {hostId === selfId && <div className="participant-controls"><button type="button" onClick={toggleLobby}>{lobby ? "🚪 Выключить Lobby" : "🚪 Включить Lobby"}</button>{roomLocked ? null : null}</div>}
       {hostId === selfId && waitingPeers.length > 0 && <div className="lobby-waiting"><strong>Ожидают входа ({waitingPeers.length})</strong>{waitingPeers.map(id => <div key={id} className="participant"><code>{id.slice(0, 8)}</code><button type="button" onClick={() => approveWaiting(id)}>Разрешить вход</button><button type="button" onClick={() => denyWaiting(id)}>Отклонить</button></div>)}</div>}
-      {participants.map(id => { const member = members.find(item => item.id === id); return <div key={id} className="participant">{id === selfId ? "Вы" : member?.username ?? "Участник"} <code>{id.slice(0, 8)}</code>{member?.role === "host" || id === hostId ? " • ведущий" : member?.role === "cohost" ? " • со-ведущий" : ""}{hostId === selfId && id !== selfId ? <><button type="button" onClick={() => muteParticipant(id)}>Микрофон</button><button type="button" onClick={() => removeParticipant(id)}>Удалить</button>{member?.role === "cohost" ? <button type="button" onClick={() => changeMemberRole(member.id, "member")}>Снять со-ведущего</button> : <button type="button" onClick={() => changeMemberRole(member?.id ?? "", "cohost")} disabled={!member}>Сделать со-ведущим</button>}</> : null}</div>; })}
+      {participants.map(participant => { const id = participant.peerId; const member = members.find(item => item.id === participant.userId); return <div key={id} className="participant">{id === selfId ? "Вы" : member?.username ?? "Участник"} <code>{id.slice(0, 8)}</code>{member?.role === "host" || id === hostId ? " • ведущий" : member?.role === "cohost" ? " • со-ведущий" : ""}{hostId === selfId && id !== selfId ? <><button type="button" onClick={() => muteParticipant(id)}>Микрофон</button><button type="button" onClick={() => removeParticipant(id)}>Удалить</button>{member?.role === "cohost" ? <button type="button" onClick={() => changeMemberRole(member.id, "member")}>Снять со-ведущего</button> : <button type="button" onClick={() => changeMemberRole(member?.id ?? "", "cohost")} disabled={!member}>Сделать со-ведущим</button>}</> : null}</div>; })}
       {hostId === selfId && <button type="button" onClick={() => toggleRoomLock()}>{roomLocked ? "🔓 Открыть комнату" : "🔒 Заблокировать комнату"}</button>}
     </aside>
     <section className="chat">
