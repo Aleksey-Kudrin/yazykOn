@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/hmac"
+	"crypto/subtle"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -186,8 +187,16 @@ func main() {
 	log.Fatal(http.ListenAndServe(":4000", nil))
 }
 
+func mediaControlAuthorized(r *http.Request) bool {
+  secret := os.Getenv("MEDIA_CONTROL_SECRET")
+  if secret == "" { return false }
+  expected := []byte("Bearer " + secret)
+  actual := []byte(r.Header.Get("Authorization"))
+  return len(actual) == len(expected) && subtle.ConstantTimeCompare(actual, expected) == 1
+}
+
 func handleRoleControl(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost || os.Getenv("MEDIA_CONTROL_SECRET") == "" || r.Header.Get("Authorization") != "Bearer "+os.Getenv("MEDIA_CONTROL_SECRET") {
+	if r.Method != http.MethodPost || !mediaControlAuthorized(r) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -221,7 +230,7 @@ func handleRoleControl(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleChatControl(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost || os.Getenv("MEDIA_CONTROL_SECRET") == "" || r.Header.Get("Authorization") != "Bearer "+os.Getenv("MEDIA_CONTROL_SECRET") {
+	if r.Method != http.MethodPost || !mediaControlAuthorized(r) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
