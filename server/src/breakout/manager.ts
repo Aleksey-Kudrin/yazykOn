@@ -36,6 +36,13 @@ export class BreakoutManager {
     return true;
   }
 
+  delete(parentRoomId: string, breakoutId: string): boolean {
+    const room = this.rooms.get(breakoutId);
+    if (!room || room.parentRoomId !== parentRoomId) return false;
+    this.rooms.delete(breakoutId);
+    return true;
+  }
+
   get(parentRoomId: string, breakoutId: string): BreakoutRoom | undefined {
     const room = this.rooms.get(breakoutId);
     return room && room.parentRoomId === parentRoomId ? this.clone(room) : undefined;
