@@ -51,6 +51,7 @@ async function join(page: import("@playwright/test").Page, roomId: string, userI
     await pc.setLocalDescription(offer);
     ws.send(JSON.stringify({ type: "offer", roomId, data: pc.localDescription }));
     await next("answer");
+    expect(["connected", "connecting", "completed"].includes(pc.connectionState) || ["connected", "completed"].includes(pc.iceConnectionState)).toBeTruthy();
     await new Promise(resolve => setTimeout(resolve, 800));
     return { peerId: joined.peerId, remoteTracks, peers: joined.data?.peers ?? [] };
   }, { endpoint: primary, roomId, accessToken: token(roomId, userId) });
