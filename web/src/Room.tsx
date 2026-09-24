@@ -77,6 +77,7 @@ export function Room({ roomId }: RoomProps) {
   const reconnectTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttempt = React.useRef(0);
   const reconnecting = React.useRef(false);
+  const redirecting = React.useRef(false);
   const connectionGeneration = React.useRef(0);
   const selfIdRef = React.useRef("");
   const identityRoomRef = React.useRef<string | null>(null);
@@ -422,12 +423,36 @@ export function Room({ roomId }: RoomProps) {
             }
             return;
           }
-          if (message.type === "error") setStatus(`Ошибка SFU: ${message.error ?? message.data?.code ?? "UNKNOWN"}`);
+          if (message.type === "error") {
+            if (message.data?.code === "SFU_ROOM_OWNER" && message.data?.endpoint) {
+              const ownerEndpoint = String(message.data.endpoint);
+              const ownerIndex = endpoints.findIndex(value => value === ownerEndpoint || value.replace(/\\/ws$/, "") === ownerEndpoint.replace(/\\/ws$/, ""));
+              if (ownerIndex >= 0) {
+                mediaEndpointRef.current = ownerIndex;
+                redirecting.current = true;
+                setStatus(`Комната обслуживается SFU ${ownerIndex + 1}/${endpoints.length} — переключаемся…`);
+                ws.close();
+                return;
+              }
+            }
+            setStatus(`Ошибка SFU: ${message.error ?? message.data?.code ?? "UNKNOWN"}`);
+          }
         };
         ws.onerror = () => { if (!stopped && generation === connectionGeneration.current && socket.current === ws) setStatus("Ошибка соединения с SFU"); };
         ws.onclose = () => {
           if (stopped || generation !== connectionGeneration.current || socket.current !== ws) return;
           setConnected(false);
+          if (redirecting.current) {
+            redirecting.current = false;
+            const redirectDelay = 100;
+            if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+            reconnectTimer.current = setTimeout(() => {
+              if (stopped || reconnecting.current) return;
+              reconnecting.current = true;
+              setReconnectNonce(value => value + 1);
+            }, redirectDelay);
+            return;
+          }
           const attempt = Math.min(reconnectAttempt.current++, 6);
           mediaEndpointRef.current = (endpointIndex + 1) % endpoints.length;
           const delay = Math.min(30000, 1000 * 2 ** attempt);
