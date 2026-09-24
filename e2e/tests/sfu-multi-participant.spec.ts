@@ -18,7 +18,25 @@ async function connect(page: import("@playwright/test").Page, userId: string, pe
     const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
     const pc = new RTCPeerConnection();
     let remoteTracks = 0;
-    pc.ontrack = () => { remoteTracks++; };
+    let remoteMediaReady: Promise<void> | null = null;
+    let resolveRemoteMedia: (() => void) | null = null;
+    remoteMediaReady = new Promise(resolve => { resolveRemoteMedia = resolve; });
+    pc.ontrack = event => {
+      remoteTracks++;
+      const stream = event.streams[0];
+      if (!stream) return;
+      const video = document.createElement("video");
+      video.autoplay = true;
+      video.muted = true;
+      video.playsInline = true;
+      video.srcObject = stream;
+      document.body.appendChild(video);
+      const finish = () => {
+        video.requestVideoFrameCallback?.(() => resolveRemoteMedia?.());
+      };
+      video.onloadeddata = finish;
+      void video.play().then(finish).catch(() => undefined);
+    };
     for (const track of stream.getTracks()) pc.addTrack(track, stream);
 
     const ws = new WebSocket(endpoint.replace(/^http/, "ws") + "/ws");
@@ -56,9 +74,14 @@ async function connect(page: import("@playwright/test").Page, userId: string, pe
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     ws.send(JSON.stringify({ type: "offer", roomId, data: pc.localDescription }));
-    await next("answer");
-
-    await new Promise(resolve => setTimeout(resolve, 1200));
+    const answer = await next("answer");
+    await pc.setRemoteDescription(answer.data);
+    if (remoteMediaReady) {
+      await Promise.race([
+        remoteMediaReady,
+        new Promise((_, reject) => setTimeout(() => reject(new Error("remote media did not produce a video frame")), 10000))
+      ]);
+    }
     return {
       peerId: joined.peerId,
       peers: joined.data?.peers ?? [],
