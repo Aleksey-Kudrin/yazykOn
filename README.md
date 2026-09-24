@@ -35,6 +35,7 @@ Browser / Desktop / Android
 The project has a working custom SFU prototype:
 
 - room creation through the API;
+- optional room passwords with HMAC-signed access tokens;
 - browser WebRTC connection to the SFU;
 - camera and microphone;
 - local video;
@@ -46,7 +47,7 @@ The project has a working custom SFU prototype:
 - Docker Compose deployment;
 - GitHub Actions builds for server, web and media.
 
-The media server exposes `/health` and `/ws`. The current room state is in memory; authentication, persistence, TURN and production hardening are not implemented yet.
+The media server exposes `/health` and `/ws`. Room metadata and password hashes are currently kept in memory. Password-protected rooms use an HMAC-signed access token shared between the API and media plane; PostgreSQL-backed persistence and full user authentication are still planned.
 
 ## Development
 
