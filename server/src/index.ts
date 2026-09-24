@@ -339,6 +339,22 @@ app.get("/api/rooms/:id", async (req, res) => {
   });
 });
 
+function encodeChatCursor(createdAt: Date | string, id: string): string {
+  return Buffer.from(JSON.stringify({ createdAt: new Date(createdAt).toISOString(), id }), "utf8").toString("base64url");
+}
+
+function decodeChatCursor(value: string | undefined): { createdAt: string; id: string } | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as { createdAt?: unknown; id?: unknown };
+    if (typeof parsed.createdAt !== "string" || typeof parsed.id !== "string") return null;
+    if (!Number.isFinite(Date.parse(parsed.createdAt))) return null;
+    return { createdAt: new Date(parsed.createdAt).toISOString(), id: parsed.id };
+  } catch {
+    return null;
+  }
+}
+
 app.get("/api/rooms/:id/messages", async (req, res) => {
   if (!db) { res.status(503).json({ error: "DATABASE_NOT_CONFIGURED" }); return; }
   const user = await currentUser(req);
@@ -346,11 +362,42 @@ app.get("/api/rooms/:id/messages", async (req, res) => {
   const roomId = req.params.id.toUpperCase();
   const member = await db.query("SELECT 1 FROM room_members WHERE room_id=$1 AND user_id=$2", [roomId, user.id]);
   if (!member.rows[0]) { res.status(403).json({ error: "ROOM_MEMBERSHIP_REQUIRED" }); return; }
-  const result = await db.query(
-    "SELECT m.id,m.user_id,m.text,m.created_at,u.username FROM room_messages m JOIN users u ON u.id=m.user_id WHERE m.room_id=$1 ORDER BY m.created_at DESC LIMIT 100",
-    [roomId]
-  );
-  res.json({ messages: result.rows.reverse() });
+
+  const rawLimit = Number(req.query.limit ?? 50);
+  const limit = Number.isFinite(rawLimit) ? Math.min(100, Math.max(1, Math.floor(rawLimit))) : 50;
+  const cursor = decodeChatCursor(typeof req.query.before === "string" ? req.query.before : undefined);
+  if (req.query.before && !cursor) { res.status(400).json({ error: "INVALID_CHAT_CURSOR" }); return; }
+
+  const result = cursor
+    ? await db.query(
+      `SELECT m.id,m.user_id,m.text,m.created_at,u.username
+       FROM room_messages m JOIN users u ON u.id=m.user_id
+       WHERE m.room_id=$1 AND (m.created_at,m.id) < ($2::timestamptz,$3::uuid)
+       ORDER BY m.created_at DESC,m.id DESC LIMIT $4`,
+      [roomId, cursor.createdAt, cursor.id, limit]
+    )
+    : await db.query(
+      `SELECT m.id,m.user_id,m.text,m.created_at,u.username
+       FROM room_messages m JOIN users u ON u.id=m.user_id
+       WHERE m.room_id=$1
+       ORDER BY m.created_at DESC,m.id DESC LIMIT $2`,
+      [roomId, limit]
+    );
+
+  const rows = [...result.rows].reverse();
+  const messages = rows.map(row => ({
+    id: row.id,
+    userId: row.user_id,
+    username: row.username,
+    text: row.text,
+    timestamp: new Date(row.created_at).getTime()
+  }));
+  const oldest = rows[0];
+  res.json({
+    messages,
+    hasMore: result.rows.length === limit,
+    nextBefore: oldest ? encodeChatCursor(oldest.created_at, oldest.id) : null
+  });
 });
 
 app.post("/api/rooms/:id/messages", async (req, res) => {
