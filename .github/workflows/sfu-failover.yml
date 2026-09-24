@@ -87,6 +87,9 @@ jobs:
           test -f e2e/artifacts/sfu-long-soak-report.json || true
           test -f e2e/artifacts/sfu-capacity-soak-report.json || true
           test -f e2e/artifacts/sfu-failover-gate-report.json || true
+          test -f e2e/artifacts/sfu-multi-room-failover-report.json || true
+          test -f e2e/artifacts/sfu-redis-outage-report.json || true
+          test -f e2e/artifacts/sfu-redis-cleanup-report.json || true
       - name: Upload failover artifacts
         if: always()
         uses: actions/upload-artifact@v4
