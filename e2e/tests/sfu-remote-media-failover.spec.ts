@@ -202,3 +202,83 @@ test("two participants recover remote media through repeated SFU failover cycles
     await Promise.all(pages.map(page => page.close()));
   }
 });
+
+
+test("four participants recover remote media through repeated SFU failover cycles", async ({ browser }) => {
+  test.skip(!process.env.SFU_FAILOVER_LIVE, "Set SFU_FAILOVER_LIVE=1 for the live Docker failover run");
+
+  const pages = await Promise.all(
+    ["p1", "p2", "p3", "p4"].map(() => browser.newPage({ permissions: ["camera", "microphone"] }))
+  );
+  let endpoint = primary;
+  const peerIds: string[] = [];
+  let stoppedService = "sfu-primary";
+
+  try {
+    await Promise.all(pages.map(page => page.goto(primary + "/health")));
+
+    for (let i = 0; i < pages.length; i++) {
+      const joined = await connect(pages[i], endpoint, `p${i + 1}`);
+      peerIds.push(joined.peerId);
+    }
+
+    await Promise.all(pages.map(page => waitForFrame(page)));
+
+    for (let cycle = 0; cycle < 4; cycle++) {
+      const nextEndpoint = endpoint === primary ? secondary : primary;
+      stoppedService = endpoint === primary ? "sfu-primary" : "sfu-secondary";
+      const startedAt = Date.now();
+
+      execFileSync("docker", ["compose", "-f", composeFile, "stop", stoppedService], { stdio: "inherit" });
+      await new Promise(resolve => setTimeout(resolve, ttlMs + 2000));
+
+      const health = await fetch(nextEndpoint + "/health");
+      expect(health.ok).toBeTruthy();
+
+      const recovered = await Promise.all(
+        pages.map((page, i) => connect(page, nextEndpoint, `p${i + 1}`, peerIds[i]))
+      );
+
+      recovered.forEach((result, i) => {
+        expect(result.peerId).toBe(peerIds[i]);
+        for (const otherPeerId of peerIds) {
+          if (otherPeerId !== peerIds[i]) expect(result.remotePeers).toContain(otherPeerId);
+        }
+      });
+
+      await Promise.all(pages.map(page => waitForFrame(page)));
+
+      const mediaState = await Promise.all(pages.map(page => page.evaluate(() =>
+        [...document.querySelectorAll("video")].map(video => ({
+          readyState: video.readyState,
+          width: video.videoWidth,
+          height: video.videoHeight
+        }))
+      )));
+      for (const videos of mediaState) {
+        expect(videos.filter(video => video.readyState >= 2 && video.width > 0 && video.height > 0).length)
+          .toBeGreaterThanOrEqual(1);
+      }
+
+      expect(Date.now() - startedAt).toBeLessThan(Number(process.env.SFU_FAILOVER_SLA_MS ?? 15000));
+
+      if (cycle < 3) {
+        execFileSync("docker", ["compose", "-f", composeFile, "start", stoppedService], { stdio: "inherit" });
+        for (let attempt = 0; attempt < 30; attempt++) {
+          try {
+            if ((await fetch(endpoint + "/health")).ok) break;
+          } catch {}
+          await new Promise(resolve => setTimeout(resolve, 500));
+          if (attempt === 29) throw new Error(stoppedService + " did not recover");
+        }
+      }
+
+      endpoint = nextEndpoint;
+    }
+  } finally {
+    try {
+      execFileSync("docker", ["compose", "-f", composeFile, "start", "sfu-primary", "sfu-secondary"], { stdio: "inherit" });
+    } catch {}
+    await Promise.all(pages.map(page => page.close()));
+  }
+});
