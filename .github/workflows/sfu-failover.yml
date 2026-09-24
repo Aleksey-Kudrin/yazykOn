@@ -68,7 +68,6 @@ jobs:
           SFU_CHURN_MAX_ACTIVE_DELTA: "1"
           SFU_CHURN_MAX_ROOM_DELTA: "0"
           SFU_CHURN_MAX_TRACK_DELTA: "0"
-          SFU_CHURN_MAX_RESOURCE_GROWTH: "0.20"
           SFU_MAX_IDLE_REDIS_KEYS: "20"
           SFU_MAX_CHURN_REDIS_KEYS: "4"
           SFU_ISOLATION_ROOMS: "3"
@@ -83,44 +82,66 @@ jobs:
           REDIS_URL: redis://127.0.0.1:6379
           SFU_PRIMARY_URL: http://127.0.0.1:4100
           SFU_SECONDARY_URL: http://127.0.0.1:4200
-        run: >
-          npx playwright test
-          tests/sfu-failover.spec.ts
-          tests/sfu-primary-crash-takeover.spec.ts
-          tests/sfu-cross-node-reconnect.spec.ts
-          tests/sfu-track-recovery.spec.ts
-          tests/sfu-room-ownership.spec.ts
-          tests/sfu-failover-stress.spec.ts
-          tests/sfu-browser-media-failover.spec.ts
-          tests/sfu-chaos-failover.spec.ts
-          tests/sfu-multi-participant.spec.ts
-          tests/sfu-load-soak.spec.ts
-          tests/sfu-metrics.spec.ts
-          tests/sfu-failover-latency.spec.ts
-          tests/sfu-failover-sla.spec.ts
-          tests/sfu-concurrent-rooms.spec.ts
-          tests/sfu-redis-outage.spec.ts
-          tests/sfu-redis-cleanup.spec.ts
-          tests/sfu-multi-room-failover.spec.ts
-          tests/sfu-remote-media-failover.spec.ts
-          tests/sfu-failover-load-soak.spec.ts
-          tests/sfu-performance-report.spec.ts
-          tests/sfu-capacity-soak.spec.ts
-          tests/sfu-chaos-regression.spec.ts
-          tests/sfu-long-soak.spec.ts
-          tests/sfu-peer-rejoin-stress.spec.ts
-          tests/sfu-resource-budget-stress.spec.ts
-          tests/sfu-media-frame-soak.spec.ts
-          tests/sfu-redis-key-cardinality.spec.ts
-          tests/sfu-ice-reconnect-recovery.spec.ts
-          tests/sfu-duplicate-join.spec.ts
-          tests/sfu-concurrent-room-churn.spec.ts
-          tests/sfu-room-isolation-churn.spec.ts
-          tests/sfu-concurrent-media-chaos.spec.ts
-          tests/sfu-media-redis-recovery.spec.ts
-          tests/sfu-concurrent-failover-redis-chaos.spec.ts
-          tests/sfu-repeated-chaos-churn.spec.ts
-          --workers=1
+        run: |
+          set +e
+          tests=(
+            tests/sfu-failover.spec.ts
+            tests/sfu-primary-crash-takeover.spec.ts
+            tests/sfu-cross-node-reconnect.spec.ts
+            tests/sfu-track-recovery.spec.ts
+            tests/sfu-room-ownership.spec.ts
+            tests/sfu-failover-stress.spec.ts
+            tests/sfu-browser-media-failover.spec.ts
+            tests/sfu-chaos-failover.spec.ts
+            tests/sfu-multi-participant.spec.ts
+            tests/sfu-load-soak.spec.ts
+            tests/sfu-metrics.spec.ts
+            tests/sfu-failover-latency.spec.ts
+            tests/sfu-failover-sla.spec.ts
+            tests/sfu-concurrent-rooms.spec.ts
+            tests/sfu-redis-outage.spec.ts
+            tests/sfu-redis-cleanup.spec.ts
+            tests/sfu-multi-room-failover.spec.ts
+            tests/sfu-remote-media-failover.spec.ts
+            tests/sfu-failover-load-soak.spec.ts
+            tests/sfu-performance-report.spec.ts
+            tests/sfu-capacity-soak.spec.ts
+            tests/sfu-chaos-regression.spec.ts
+            tests/sfu-long-soak.spec.ts
+            tests/sfu-peer-rejoin-stress.spec.ts
+            tests/sfu-resource-budget-stress.spec.ts
+            tests/sfu-media-frame-soak.spec.ts
+            tests/sfu-redis-key-cardinality.spec.ts
+            tests/sfu-ice-reconnect-recovery.spec.ts
+            tests/sfu-duplicate-join.spec.ts
+            tests/sfu-concurrent-room-churn.spec.ts
+            tests/sfu-room-isolation-churn.spec.ts
+            tests/sfu-concurrent-media-chaos.spec.ts
+            tests/sfu-media-redis-recovery.spec.ts
+            tests/sfu-concurrent-failover-redis-chaos.spec.ts
+            tests/sfu-repeated-chaos-churn.spec.ts
+          )
+          failed=0
+          for spec in "${tests[@]}"; do
+            echo "===== SFU isolated probe: $spec ====="
+            docker compose -p yazykon-sfu-it -f e2e/docker-compose.sfu-failover.yml down -v >/dev/null 2>&1 || true
+            docker compose -p yazykon-sfu-it -f e2e/docker-compose.sfu-failover.yml up -d --build
+            ready=0
+            for i in $(seq 1 60); do
+              if curl -fsS http://127.0.0.1:4100/health >/dev/null && curl -fsS http://127.0.0.1:4200/health >/dev/null; then ready=1; break; fi
+              sleep 1
+            done
+            if [ "$ready" -ne 1 ]; then
+              echo "SFU infrastructure failed to become ready for $spec"
+              failed=1
+              continue
+            fi
+            npx playwright test "$spec" --workers=1
+            rc=$?
+            if [ "$rc" -ne 0 ]; then failed=1; fi
+          done
+          docker compose -p yazykon-sfu-it -f e2e/docker-compose.sfu-failover.yml down -v >/dev/null 2>&1 || true
+          exit "$failed"
       - name: Run consolidated failover gate
         if: always()
         env:
