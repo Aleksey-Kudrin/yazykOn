@@ -1,6 +1,6 @@
 import type { Server as HttpServer } from "node:http";
 import { randomUUID } from "node:crypto";
-import { WebSocketServer, WebSocket } from "ws";
+import { WebSocketServer, WebSocket, type VerifyClientCallbackAsync } from "ws";
 
 function allowedOrigin(origin: string | undefined) {
   if (!origin) return true;
@@ -33,7 +33,7 @@ export function attachSignaling(server: HttpServer) {
   const wss = new WebSocketServer({
     server,
     path: "/ws",
-    verifyClient: (info) => allowedOrigin(info.origin)
+    verifyClient: ((info) => allowedOrigin(info.origin)) as VerifyClientCallbackAsync
   });
 
   wss.on("connection", (socket) => {
