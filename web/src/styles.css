@@ -24,20 +24,10 @@ body {
   box-shadow: 0 24px 80px rgba(0, 0, 0, .35);
 }
 
-.logo {
-  font-size: 28px;
-  font-weight: 800;
-  letter-spacing: -.04em;
-}
-
+.logo { font-size: 28px; font-weight: 800; letter-spacing: -.04em; }
 .logo span { font-weight: 500; }
 
-h1 {
-  margin: 48px 0 12px;
-  font-size: clamp(32px, 6vw, 54px);
-  line-height: 1;
-}
-
+h1 { margin: 48px 0 12px; font-size: clamp(32px, 6vw, 54px); line-height: 1; }
 p { color: #94a3b8; font-size: 18px; }
 
 .status {
@@ -48,13 +38,7 @@ p { color: #94a3b8; font-size: 18px; }
   color: #cbd5e1;
 }
 
-.dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: #ef4444;
-}
-
+.dot { width: 10px; height: 10px; border-radius: 50%; background: #ef4444; }
 .dot.online { background: #22c55e; }
 
 input {
@@ -88,4 +72,31 @@ button:disabled { opacity: .6; cursor: wait; }
 
 .room strong { display: block; color: #fff; margin-bottom: 8px; }
 .room code { color: #fff; }
-.room a { display: inline-block; margin-top: 12px; color: #93c5fd; }
+
+.meeting {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #020617;
+}
+
+.meeting-header {
+  height: 58px;
+  flex: 0 0 58px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 0 18px;
+  background: #0f172a;
+  border-bottom: 1px solid #1e293b;
+}
+
+.meeting-header .logo { font-size: 22px; }
+.meeting-header .room-code { flex: 1; color: #94a3b8; font-size: 14px; }
+.meeting-header a { color: #fda4af; text-decoration: none; }
+
+.meeting-frame {
+  flex: 1;
+  min-height: 0;
+}
