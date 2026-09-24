@@ -28,7 +28,8 @@ Browser / Desktop / Android
 - Deployment: Docker Compose on Proxmox LXC
 - PostgreSQL-backed users, sessions, rooms, memberships, persistent roles and room chat history
 - HMAC-signed room access tokens shared by API and SFU
-- Redis: planned
+- Redis 8: presence/pub-sub foundation and deployment-ready connection
+- `/health` and `/ready` service/readiness endpoints
 - coturn
 - Desktop: Electron, planned
 - Android: Kotlin, planned
