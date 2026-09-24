@@ -116,9 +116,11 @@ async function initDatabase() {
   CREATE INDEX IF NOT EXISTS audit_events_room_created_idx ON audit_events(room_id, created_at);`);
 }
 
+const SESSION_TTL_SECONDS = Math.max(300, Number(process.env.SESSION_TTL_SECONDS ?? 604800) || 604800);
+
 function authCookie(sessionId: string) {
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-  return `yazykon_session=${sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800${secure}`;
+  return `yazykon_session=${sessionId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}${secure}`;
 }
 
 function readSessionId(req: express.Request) {
@@ -221,7 +223,7 @@ app.post("/api/auth/register", async (req, res) => {
     const userId = randomUUID();
     await db.query("INSERT INTO users(id, username, password_hash) VALUES($1,$2,$3)", [userId, username, hash]);
     const sessionId = randomUUID();
-    await db.query("INSERT INTO sessions(id,user_id,expires_at) VALUES($1,$2,now()+interval '7 days')", [sessionId,userId]);
+    await db.query("INSERT INTO sessions(id,user_id,expires_at) VALUES($1,$2,now()+($3 * interval '1 second'))", [sessionId,userId]);
     res.setHeader("Set-Cookie", authCookie(sessionId));
     void writeAuditEvent({ userId, action: "auth.register", ip: requestIp(req) });
     res.status(201).json({ id:userId, username });
