@@ -5,7 +5,7 @@ import helmet from "helmet";
 import { createServer } from "node:http";
 import { Pool } from "pg";
 import { attachSignaling } from "./signaling.js";
-import { closeRedis, getRedis, redisEnabled } from "./redis.js";
+import { closeRedis, getRedis, redisEnabled, redisListPresence, redisSetPresence, redisClearPresence } from "./redis.js";
 import { BreakoutManager } from "./breakout/manager.js";
 import { validateCredentials, hashPassword, verifyPassword } from "./security.js";
 
@@ -184,6 +184,39 @@ app.get("/ready", async (_req, res) => {
   } catch {
     res.status(503).json({ ok: false, database: false });
   }
+});
+
+app.get("/api/rooms/:id/presence", async (req, res) => {
+  if (!redisEnabled()) { res.json({ enabled: false, users: [] }); return; }
+  const user = await currentUser(req);
+  if (!user) { res.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+  const roomId = req.params.id.toUpperCase();
+  const member = await db?.query("SELECT 1 FROM room_members WHERE room_id=$1 AND user_id=$2", [roomId, user.id]);
+  if (!member?.rows[0]) { res.status(403).json({ error: "ROOM_MEMBER_REQUIRED" }); return; }
+  res.json({ enabled: true, users: await redisListPresence(roomId) });
+});
+
+app.post("/api/rooms/:id/presence", async (req, res) => {
+  if (!redisEnabled()) { res.status(503).json({ error: "REDIS_NOT_CONFIGURED" }); return; }
+  const user = await currentUser(req);
+  if (!user) { res.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+  const roomId = req.params.id.toUpperCase();
+  const member = await db?.query("SELECT 1 FROM room_members WHERE room_id=$1 AND user_id=$2", [roomId, user.id]);
+  if (!member?.rows[0]) { res.status(403).json({ error: "ROOM_MEMBER_REQUIRED" }); return; }
+  const ttl = Math.min(300, Math.max(15, Number(req.body?.ttl ?? 60) || 60));
+  await redisSetPresence(roomId, user.id, ttl);
+  res.json({ enabled: true, ttl });
+});
+
+app.delete("/api/rooms/:id/presence", async (req, res) => {
+  if (!redisEnabled()) { res.status(503).json({ error: "REDIS_NOT_CONFIGURED" }); return; }
+  const user = await currentUser(req);
+  if (!user) { res.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+  const roomId = req.params.id.toUpperCase();
+  const member = await db?.query("SELECT 1 FROM room_members WHERE room_id=$1 AND user_id=$2", [roomId, user.id]);
+  if (!member?.rows[0]) { res.status(403).json({ error: "ROOM_MEMBER_REQUIRED" }); return; }
+  await redisClearPresence(roomId, user.id);
+  res.status(204).end();
 });
 
 app.get("/api/health", (_req, res) => {
