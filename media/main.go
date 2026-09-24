@@ -36,6 +36,7 @@ type Peer struct {
 	negotiationPending bool
 	published      map[string]*webrtc.TrackLocalStaticRTP
 	subscriptions  map[string]*webrtc.RTPSender
+	pendingICE      []webrtc.ICECandidateInit
 }
 
 type Room struct {
@@ -241,6 +242,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 					negotiationFinished(me)
 					continue
 				}
+				flushPendingICE(me)
 				answer, e := pc.CreateAnswer(nil)
 				if e != nil {
 					negotiationFinished(me)
@@ -255,13 +257,25 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 				negotiationFinished(me)
 			} else {
 				if pc.SetRemoteDescription(desc) == nil {
+					flushPendingICE(me)
 					negotiationFinished(me)
 				}
 			}
 		case "ice":
 			var candidate webrtc.ICECandidateInit
 			if json.Unmarshal(msg.Data, &candidate) == nil {
-				_ = pc.AddICECandidate(candidate)
+				me.mu.Lock()
+				if me.closed {
+					me.mu.Unlock()
+					continue
+				}
+				if pc.RemoteDescription() == nil {
+					me.pendingICE = append(me.pendingICE, candidate)
+					me.mu.Unlock()
+				} else {
+					me.mu.Unlock()
+					_ = pc.AddICECandidate(candidate)
+				}
 			}
 		}
 	}
@@ -368,6 +382,22 @@ func removePeer(p *Peer) {
 		roomsMu.Lock()
 		delete(rooms, p.room.id)
 		roomsMu.Unlock()
+	}
+}
+
+func flushPendingICE(p *Peer) {
+	p.mu.Lock()
+	pending := append([]webrtc.ICECandidateInit(nil), p.pendingICE...)
+	p.pendingICE = nil
+	closed := p.closed
+	p.mu.Unlock()
+	if closed {
+		return
+	}
+	for _, candidate := range pending {
+		if err := p.pc.AddICECandidate(candidate); err != nil {
+			log.Printf("add buffered ICE candidate for peer %s: %v", p.id, err)
+		}
 	}
 }
 
