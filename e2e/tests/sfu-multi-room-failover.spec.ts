@@ -63,6 +63,21 @@ async function redisOwners(roomIds: string[]) {
   return owners;
 }
 
+async function redisRoomState(roomIds: string[]) {
+  const { createClient } = await import("redis");
+  const client = createClient({ url: redisUrl });
+  await client.connect();
+  const states = await Promise.all(roomIds.map(async roomId => ({
+    roomId,
+    owner: await client.exists("yazykon:sfu:owner:" + roomId),
+    state: await client.exists("yazykon:sfu:state:" + roomId),
+    tracks: await client.exists("yazykon:sfu:tracks:" + roomId),
+    peers: (await client.keys("yazykon:sfu:peer:" + roomId + ":*")).length
+  })));
+  await client.quit();
+  return states;
+}
+
 async function joinRoom(page: import("@playwright/test").Page, endpoint: string, roomId: string, peerId?: string) {
   return page.evaluate(async ({ endpoint, roomId, accessToken, peerId }) => {
     const ws = new WebSocket(endpoint.replace(/^http/, "ws") + "/ws");
@@ -130,6 +145,7 @@ test("multiple active rooms transfer ownership and reconnect on secondary", asyn
     ));
     const reconnectMs = Date.now() - reconnectStarted;
     const metricsAfter = await runtimeMetrics(secondary);
+    const redisAfter = await redisRoomState(roomIds);
     expect(reconnectResults.every((item, i) => item.peerId === joined[i].peerId)).toBeTruthy();
 
     const report = {
@@ -138,6 +154,7 @@ test("multiple active rooms transfer ownership and reconnect on secondary", asyn
       reconnectMs,
       metricsBefore,
       metricsAfter,
+      redisAfter,
       ownersBefore: before.map(item => item.value),
       ownersAfter: after,
       reconnectResults,
