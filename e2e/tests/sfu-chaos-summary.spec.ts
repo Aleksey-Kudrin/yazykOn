@@ -1,0 +1,4 @@
+import { test, expect } from "@playwright/test";
+import fs from "node:fs";
+import path from "node:path";
+test("consolidated chaos artifacts are structurally healthy",async()=>{const dir=process.env.SFU_ARTIFACT_DIR??"artifacts";const names=["sfu-concurrent-failover-redis-chaos-report.json","sfu-repeated-chaos-churn-report.json","sfu-media-redis-recovery-report.json"];const missing:string[]=[];const invalid:string[]=[];for(const n of names){const f=path.join(dir,n);if(!fs.existsSync(f)){missing.push(n);continue}try{const x=JSON.parse(fs.readFileSync(f,"utf8"));if(x.pass!==true)invalid.push(n)}catch{invalid.push(n)}}expect(missing).toEqual([]);expect(invalid).toEqual([]);fs.writeFileSync(path.join(dir,"sfu-chaos-summary-report.json"),JSON.stringify({generatedAt:new Date().toISOString(),reports:names,count:names.length,pass:true},null,2))});
