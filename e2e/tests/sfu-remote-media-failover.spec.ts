@@ -145,6 +145,13 @@ test("two participants recover remote media after SFU failover", async ({ browse
 
   await Promise.all(recovered.map((_, index) => waitForFrame(pages[index])));
 
+  const recoveredFrameState = await Promise.all(pages.map(page => page.evaluate(() =>
+    [...document.querySelectorAll("video")].map(video => ({ readyState: video.readyState, width: video.videoWidth, height: video.videoHeight }))
+  )));
+  for (const videos of recoveredFrameState) {
+    expect(videos.some(video => video.readyState >= 2 && video.width > 0 && video.height > 0)).toBeTruthy();
+  }
+
   const connectionStates = await Promise.all(pages.map(page => page.evaluate(() =>
     ((window as any).__remoteFailoverConnectionStates ?? []).map((pc: RTCPeerConnection) => pc.connectionState)
   )));
