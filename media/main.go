@@ -176,7 +176,11 @@ func handleRoleControl(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	var update RoleUpdate
+	var update struct {
+		RoomID string `json:"roomId"`
+		UserID string `json:"userId"`
+		Role string `json:"role"`
+	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&update); err != nil || update.RoomID == "" || update.UserID == "" || (update.Role != "cohost" && update.Role != "member") {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
