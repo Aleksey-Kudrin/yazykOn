@@ -1,8 +1,9 @@
 import React from "react";
-import { accessRoom, getRoom, getRoomMembers, setRoomMemberRole, type RoomMember } from "./api";
+import { accessRoom, getRoom, getRoomMembers, getRoomMessages, sendRoomMessage, setRoomMemberRole, type RoomMember } from "./api";
 
 interface RoomProps { roomId: string; }
 type Participant = { peerId: string; userId?: string; role?: string };
+type ChatMessage = { id?: string; userId?: string; username?: string; peerId?: string; text: string; timestamp: number };
 type SignalMessage =
   | { type: "joined"; roomId: string; peerId: string; data?: { peers: string[]; peerMeta?: Record<string, { userId?: string; role?: string }>; tracks?: number; hostId?: string; locked?: boolean; lobby?: boolean } }
   | { type: "peer-joined"; peerId: string; data?: { userId?: string; role?: string } }
@@ -58,7 +59,7 @@ export function Room({ roomId }: RoomProps) {
   const [hostId, setHostId] = React.useState("");
   const [sharing, setSharing] = React.useState(false);
   const screenTrack = React.useRef<MediaStreamTrack | null>(null);
-  const [chat, setChat] = React.useState<Array<{ peerId: string; text: string; timestamp: number }>>([]);
+  const [chat, setChat] = React.useState<ChatMessage[]>([]);
   const [chatText, setChatText] = React.useState("");
   const [members, setMembers] = React.useState<RoomMember[]>([]);
   const selfRole = participants.find(participant => participant.peerId === selfId)?.role;
@@ -70,6 +71,7 @@ export function Room({ roomId }: RoomProps) {
     async function start() {
       try {
         const room = await getRoom(roomId);
+        try { setChat(await getRoomMessages(roomId)); } catch (error) { console.warn("chat history unavailable", error); }
         let accessToken = sessionStorage.getItem("yazykon-access-" + roomId);
         if (room.requiresPassword && !accessToken) {
           const password = window.prompt("Введите пароль комнаты");
@@ -243,8 +245,9 @@ export function Room({ roomId }: RoomProps) {
             return;
           }
           if (message.type === "chat") {
-            const text = message.data?.text;
-            if (text) setChat(current => [...current.slice(-99), { peerId: message.peerId, text, timestamp: message.data?.timestamp ?? Date.now() }]);
+            const data = message.data ?? {};
+            const text = data.text;
+            if (text) setChat(current => current.some(item => item.id === data.id) ? current : [...current.slice(-99), { id: data.id, userId: data.userId, username: data.username, peerId: message.peerId, text, timestamp: data.timestamp ?? Date.now() }]);
             return;
           }
           if (message.type === "answer") {
@@ -356,17 +359,21 @@ export function Room({ roomId }: RoomProps) {
     ws.send(JSON.stringify({ type: "moderate", roomId, data: { action: roomLocked ? "unlock" : "lock" } }));
   }
 
-  function sendChat(event: React.FormEvent) {
+  async function sendChat(event: React.FormEvent) {
     event.preventDefault();
     const text = chatText.trim();
-    const ws = socket.current;
-    if (!text || !ws || ws.readyState !== WebSocket.OPEN) return;
+    if (!text) return;
     if (Array.from(text).length > 2000) {
       setStatus("Сообщение слишком длинное (максимум 2000 символов)");
       return;
     }
-    ws.send(JSON.stringify({ type: "chat", roomId, data: { text } }));
-    setChatText("");
+    try {
+      const message = await sendRoomMessage(roomId, text);
+      setChat(current => current.some(item => item.id === message.id) ? current : [...current.slice(-99), message]);
+      setChatText("");
+    } catch (error) {
+      setStatus("Не удалось отправить сообщение");
+    }
   }
 
   return <main className="meeting">
@@ -388,7 +395,7 @@ export function Room({ roomId }: RoomProps) {
       <strong>Чат</strong>
       <div className="chat-messages">
         {!chat.length && <span className="chat-empty">Сообщений пока нет</span>}
-        {chat.map((message, index) => <div key={message.timestamp + "-" + index} className="chat-message"><code>{message.peerId === selfId ? "Вы" : message.peerId.slice(0, 8)}</code><span>{message.text}</span></div>)}
+        {chat.map((message, index) => <div key={message.timestamp + "-" + index} className="chat-message"><code>{message.userId && message.userId === participants.find(item => item.peerId === selfId)?.userId ? "Вы" : message.username ?? (message.peerId ? message.peerId.slice(0, 8) : "Участник")}</code><span>{message.text}</span></div>)}
       </div>
       <form onSubmit={sendChat}>
         <input value={chatText} onChange={event => setChatText(event.target.value)} maxLength={2000} placeholder="Написать сообщение…" />
