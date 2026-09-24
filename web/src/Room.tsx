@@ -1,9 +1,9 @@
 import React from "react";
 import { MeetingFeatureControls } from "./MeetingFeatures";
+import { participantFromMeta, removeParticipant, upsertParticipant, type Participant } from "./participantModel";
 import { accessRoom, getRoom, getRoomMembers, getRoomMessages, sendRoomMessage, setRoomMemberRole, getBreakoutRooms, createBreakoutRoom, assignBreakoutParticipant, removeBreakoutParticipant, deleteBreakoutRoom, joinBreakoutRoom, refreshRoomAccessToken, type BreakoutRoom, type RoomMember } from "./api";
 
 interface RoomProps { roomId: string; }
-type Participant = { peerId: string; userId?: string; role?: string };
 type ChatMessage = { id?: string; userId?: string; username?: string; peerId?: string; text: string; timestamp: number };
 type SignalMessage =
   | { type: "joined"; roomId: string; peerId: string; data?: { peers: string[]; peerMeta?: Record<string, { userId?: string; role?: string }>; tracks?: number; hostId?: string; locked?: boolean; lobby?: boolean } }
@@ -275,7 +275,7 @@ export function Room({ roomId }: RoomProps) {
           if (message.type === "joined") {
             const data = message.data;
             setSelfId(message.peerId);
-            setParticipants([ { peerId: message.peerId, ...data?.peerMeta?.[message.peerId] }, ...(data?.peers ?? []).map(peerId => ({ peerId, ...data?.peerMeta?.[peerId] })) ]);
+            setParticipants([participantFromMeta(message.peerId, data?.peerMeta?.[message.peerId]), ...(data?.peers ?? []).map(peerId => participantFromMeta(peerId, data?.peerMeta?.[peerId]))]);
             setHostId(data?.hostId ?? message.peerId);
             setRoomLocked(Boolean(data?.locked));
             setLobby(Boolean(data?.lobby));
@@ -305,7 +305,7 @@ export function Room({ roomId }: RoomProps) {
           if (message.type === "role-updated") { const data = message.data ?? {}; setParticipants(current => current.map(p => p.userId === data.userId ? { ...p, role: data.role } : p)); setMembers(current => current.map(m => m.id === data.userId ? { ...m, role: data.role as RoomMember["role"] } : m)); return; }
 
     if (message.type === "peer-joined") {
-            setParticipants(current => current.some(p => p.peerId === message.peerId) ? current : [...current, { peerId: message.peerId, userId: message.data?.userId, role: message.data?.role }]);
+            setParticipants(current => upsertParticipant(current, participantFromMeta(message.peerId, message.data)));
             setStatus("Новый участник подключился");
             return;
           }
@@ -323,7 +323,7 @@ export function Room({ roomId }: RoomProps) {
               }
             }
             setRemotes(Array.from(remoteStreams.current, ([id, stream]) => ({ id, stream })));
-            setParticipants(current => current.filter(p => p.peerId !== message.peerId));
+            setParticipants(current => removeParticipant(current, message.peerId));
             setStatus("Участник вышел");
             return;
           }
