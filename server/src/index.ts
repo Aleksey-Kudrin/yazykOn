@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import { Pool } from "pg";
 import { attachSignaling } from "./signaling.js";
 import { closeRedis, getRedis, redisEnabled } from "./redis.js";
-import { NewManager } from "./breakout/manager.js";
+import { BreakoutManager } from "./breakout/manager.js";
 
 type RoomRole = "host" | "cohost" | "member";
 
@@ -26,7 +26,7 @@ const allowedOrigins = new Set(
 );
 const authRate = new Map<string, { count: number; resetAt: number }>();
 const roomRate = new Map<string, { count: number; resetAt: number }>();
-const breakoutManager = NewManager();
+const breakoutManager = new BreakoutManager();
 
 function requestIp(req: express.Request) {
   return req.socket.remoteAddress ?? "unknown";
@@ -311,6 +311,18 @@ app.post("/api/rooms/:id/access", async (req, res) => {
   res.json({ accessToken: issueRoomAccessToken(room.id, user.id, role), role });
 });
 
+app.post("/api/rooms/:id/token", async (req, res) => {
+  if (!db) { res.status(503).json({ error: "DATABASE_NOT_CONFIGURED" }); return; }
+  if (!roomAccessSecret) { res.status(503).json({ error: "ROOM_ACCESS_NOT_CONFIGURED" }); return; }
+  const user = await currentUser(req);
+  if (!user) { res.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+  const roomId = req.params.id.toUpperCase();
+  const member = await db.query("SELECT role FROM room_members WHERE room_id=$1 AND user_id=$2", [roomId, user.id]);
+  if (!member.rows[0]) { res.status(403).json({ error: "ROOM_MEMBERSHIP_REQUIRED" }); return; }
+  const role = member.rows[0].role as RoomRole;
+  res.json({ accessToken: issueRoomAccessToken(roomId, user.id, role), role });
+});
+
 app.get("/api/rooms/:id", async (req, res) => {
   if (!db) { res.status(503).json({ error: "DATABASE_NOT_CONFIGURED" }); return; }
   const result = await db.query(
@@ -379,8 +391,8 @@ app.post("/api/rooms/:id/breakouts", async (req, res) => {
   const name = typeof req.body?.name === "string" ? req.body.name.trim().slice(0, 100) : "";
   if (!name) { res.status(400).json({ error: "INVALID_BREAKOUT_NAME" }); return; }
   const id = randomBytes(5).toString("base64url").slice(0, 8).toUpperCase();
-  const breakout = breakoutManager.Create(id, name);
-  res.status(201).json({ id: breakout.id, name: breakout.name, participants: [] });
+  const breakout = breakoutManager.create(roomId, id, name);
+  res.status(201).json({ id: breakout.id, name: breakout.name, parentRoomId: roomId, participants: [] });
 });
 
 app.get("/api/rooms/:id/breakouts", async (req, res) => {
@@ -390,7 +402,7 @@ app.get("/api/rooms/:id/breakouts", async (req, res) => {
   const roomId = req.params.id.toUpperCase();
   const member = await db.query("SELECT 1 FROM room_members WHERE room_id=$1 AND user_id=$2", [roomId, user.id]);
   if (!member.rows[0]) { res.status(403).json({ error: "ROOM_MEMBERSHIP_REQUIRED" }); return; }
-  res.json({ rooms: breakoutManager.List().map(r => ({ id: r.id, name: r.name, participants: Object.keys(r.participants) })) });
+  res.json({ rooms: breakoutManager.list(roomId).map(r => ({ id: r.id, name: r.name, parentRoomId: r.parentRoomId, participants: Object.keys(r.participants) })) });
 });
 
 app.get("/api/rooms/:id/membership", async (req, res) => {
