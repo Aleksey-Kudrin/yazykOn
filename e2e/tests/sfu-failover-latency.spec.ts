@@ -27,7 +27,6 @@ test("SFU failover recovery latency is measured end-to-end", async ({ browser })
   test.skip(!process.env.SFU_FAILOVER_LIVE, "Set SFU_FAILOVER_LIVE=1 for the live Docker run");
 
   const page = await browser.newPage({ permissions: ["camera", "microphone"] });
-  let primaryStopped = false;
   await page.goto(primary + "/health");
 
   const connected = await page.evaluate(async ({ endpoint, roomId, accessToken }) => {
@@ -70,7 +69,6 @@ test("SFU failover recovery latency is measured end-to-end", async ({ browser })
 
   const startedAt = Date.now();
   execFileSync("docker", ["compose", "-f", composeFile, "stop", "sfu-primary"], { stdio: "inherit" });
-  primaryStopped = true;
 
   let targetReady = false;
   for (let i = 0; i < 40; i++) {
