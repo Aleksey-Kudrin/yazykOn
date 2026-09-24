@@ -44,7 +44,7 @@ jobs:
           REDIS_URL: redis://127.0.0.1:6379
           SFU_PRIMARY_URL: http://127.0.0.1:4100
           SFU_SECONDARY_URL: http://127.0.0.1:4200
-        run: npx playwright test tests/sfu-failover.spec.ts tests/sfu-room-ownership.spec.ts tests/sfu-browser-media-failover.spec.ts tests/sfu-multi-participant.spec.ts tests/sfu-failover-stress.spec.ts tests/sfu-load-soak.spec.ts tests/sfu-metrics.spec.ts tests/sfu-failover-latency.spec.ts tests/sfu-failover-sla.spec.ts tests/sfu-concurrent-rooms.spec.ts tests/sfu-multi-room-failover.spec.ts tests/sfu-remote-media-failover.spec.ts
+        run: npx playwright test tests/sfu-failover.spec.ts tests/sfu-room-ownership.spec.ts tests/sfu-browser-media-failover.spec.ts tests/sfu-multi-participant.spec.ts tests/sfu-failover-stress.spec.ts tests/sfu-load-soak.spec.ts tests/sfu-metrics.spec.ts tests/sfu-failover-latency.spec.ts tests/sfu-failover-sla.spec.ts tests/sfu-concurrent-rooms.spec.ts tests/sfu-redis-outage.spec.ts tests/sfu-multi-room-failover.spec.ts tests/sfu-remote-media-failover.spec.ts
       - name: Collect failover artifacts
         if: always()
         working-directory: .
