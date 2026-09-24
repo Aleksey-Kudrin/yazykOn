@@ -7,7 +7,7 @@ import { Pool } from "pg";
 import { attachSignaling } from "./signaling.js";
 import { closeRedis, getRedis, redisEnabled } from "./redis.js";
 import { BreakoutManager } from "./breakout/manager.js";
-import { validateCredentials } from "./security.js";
+import { validateCredentials, hashPassword, verifyPassword } from "./security.js";
 
 type RoomRole = "host" | "cohost" | "member";
 
@@ -137,8 +137,7 @@ async function currentUser(req: express.Request) {
   return result.rows[0] ?? null;
 }
 
-function requireScrypt(password: string, salt: string) { return scryptSync(password, salt, 32).toString("hex"); }
-function verifyScrypt(password: string, stored: string) { const [salt, expectedHex] = stored.split(":"); if (!salt || !expectedHex) return false; const actual=Buffer.from(requireScrypt(password,salt),"hex"); const expected=Buffer.from(expectedHex,"hex"); return actual.length===expected.length && timingSafeEqual(actual,expected); }
+function requireScrypt(password: string, salt: string) { return scryptSync(password, salt, 32, { N: 32768, r: 8, p: 2, maxmem: 64 * 1024 * 1024 }).toString("hex"); }
 
 async function writeAuditEvent(input: { userId?: string | null; roomId?: string | null; action: string; targetUserId?: string | null; ip?: string | null }) {
   if (!db) return;
@@ -218,10 +217,9 @@ app.post("/api/auth/register", async (req, res) => {
   if (!credentials) { res.status(400).json({ error: "INVALID_CREDENTIALS" }); return; }
   const { username, password } = credentials;
   try {
-    const salt = randomBytes(16).toString("hex");
-    const hash = requireScrypt(password, salt);
+    const hash = hashPassword(password);
     const userId = randomUUID();
-    await db.query("INSERT INTO users(id, username, password_hash) VALUES($1,$2,$3)", [userId, username, `${salt}:${hash}`]);
+    await db.query("INSERT INTO users(id, username, password_hash) VALUES($1,$2,$3)", [userId, username, hash]);
     const sessionId = randomUUID();
     await db.query("INSERT INTO sessions(id,user_id,expires_at) VALUES($1,$2,now()+interval '7 days')", [sessionId,userId]);
     res.setHeader("Set-Cookie", authCookie(sessionId));
@@ -239,7 +237,10 @@ app.post("/api/auth/login", async (req, res) => {
   const password = credentials?.password ?? "";
   const result = await db.query("SELECT id, username, password_hash FROM users WHERE username=$1", [username]);
   const row = result.rows[0];
-  if (!row || !verifyScrypt(password, row.password_hash)) { res.status(401).json({ error:"INVALID_CREDENTIALS" }); return; }
+  if (!row || !verifyPassword(password, row.password_hash)) { res.status(401).json({ error:"INVALID_CREDENTIALS" }); return; }
+  if (row && !String(row.password_hash).startsWith("v2$")) {
+    await db.query("UPDATE users SET password_hash=$1 WHERE id=$2", [hashPassword(password), row.id]);
+  }
   const sessionId = randomUUID();
   await db.query("INSERT INTO sessions(id,user_id,expires_at) VALUES($1,$2,now()+interval '7 days')", [sessionId,row.id]);
   res.setHeader("Set-Cookie", authCookie(sessionId));
