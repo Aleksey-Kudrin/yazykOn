@@ -1,7 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { Room } from "./Room";
-import { createRoom } from "./api";
+import { createRoom, getMe, login, register } from "./api";
 import "./styles.css";
 
 function Home() {
@@ -10,6 +10,13 @@ function Home() {
   const [name, setName] = React.useState("Моя конференция");
   const [loading, setLoading] = React.useState(false);
   const [password, setPassword] = React.useState("");
+  const [username, setUsername] = React.useState("");
+  const [authPassword, setAuthPassword] = React.useState("");
+  const [user, setUser] = React.useState<{ id: string; username: string } | null>(null);
+  const [authMode, setAuthMode] = React.useState<"login" | "register">("login");
+  const [authError, setAuthError] = React.useState("");
+
+  React.useEffect(() => { getMe().then(setUser).catch(() => setUser(null)); }, []);
 
   React.useEffect(() => {
     fetch((import.meta.env.VITE_API_URL ?? "http://localhost:3000") + "/api/health")
@@ -18,7 +25,14 @@ function Home() {
       .catch(() => setStatus("Сервер недоступен"));
   }, []);
 
+  async function handleAuth() {
+    setAuthError("");
+    try { const next = authMode === "login" ? await login(username, authPassword) : await register(username, authPassword); setUser(next); setAuthPassword(""); }
+    catch (error) { setAuthError(error instanceof Error ? error.message : "Ошибка авторизации"); }
+  }
+
   async function handleCreateRoom() {
+    if (!user) { setAuthError("Сначала войдите в аккаунт"); return; }
     setLoading(true);
     try {
       const created = await createRoom(name, password);
