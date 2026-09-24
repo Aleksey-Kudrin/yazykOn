@@ -61,6 +61,9 @@ export function Room({ roomId }: RoomProps) {
   const [chat, setChat] = React.useState<Array<{ peerId: string; text: string; timestamp: number }>>([]);
   const [chatText, setChatText] = React.useState("");
   const [members, setMembers] = React.useState<RoomMember[]>([]);
+  const selfRole = participants.find(participant => participant.peerId === selfId)?.role;
+  const canModerate = hostId === selfId || selfRole === "cohost";
+  const canAssignRoles = hostId === selfId;
 
   React.useEffect(() => {
     let stopped = false;
@@ -159,7 +162,7 @@ export function Room({ roomId }: RoomProps) {
           if (message.type === "joined") {
             const data = message.data;
             setSelfId(message.peerId);
-            setParticipants([ { peerId: message.peerId }, ...(data?.peers ?? []).map(peerId => ({ peerId, ...data?.peerMeta?.[peerId] })) ]);
+            setParticipants([ { peerId: message.peerId, ...data?.peerMeta?.[message.peerId] }, ...(data?.peers ?? []).map(peerId => ({ peerId, ...data?.peerMeta?.[peerId] })) ]);
             setHostId(data?.hostId ?? message.peerId);
             setRoomLocked(Boolean(data?.locked));
             setLobby(Boolean(data?.lobby));
@@ -324,13 +327,13 @@ export function Room({ roomId }: RoomProps) {
 
   function muteParticipant(peerId: string) {
     const ws = socket.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN || hostId !== selfId) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !canModerate) return;
     ws.send(JSON.stringify({ type: "moderate", roomId, data: { action: "mute", peerId } }));
   }
 
   function removeParticipant(peerId: string) {
     const ws = socket.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN || hostId !== selfId) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !canModerate) return;
     ws.send(JSON.stringify({ type: "moderate", roomId, data: { action: "remove", peerId } }));
   }
 
@@ -376,10 +379,10 @@ export function Room({ roomId }: RoomProps) {
     <div className="meeting-status">{status} {connected ? "• online" : ""}</div>
     <aside className="participants">
       <strong>Участники ({participants.length})</strong>
-      {hostId === selfId && <div className="participant-controls"><button type="button" onClick={toggleLobby}>{lobby ? "🚪 Выключить Lobby" : "🚪 Включить Lobby"}</button>{roomLocked ? null : null}</div>}
-      {hostId === selfId && waitingPeers.length > 0 && <div className="lobby-waiting"><strong>Ожидают входа ({waitingPeers.length})</strong>{waitingPeers.map(id => <div key={id} className="participant"><code>{id.slice(0, 8)}</code><button type="button" onClick={() => approveWaiting(id)}>Разрешить вход</button><button type="button" onClick={() => denyWaiting(id)}>Отклонить</button></div>)}</div>}
+      {canModerate && <div className="participant-controls"><button type="button" onClick={toggleLobby}>{lobby ? "🚪 Выключить Lobby" : "🚪 Включить Lobby"}</button>{roomLocked ? null : null}</div>}
+      {canModerate && waitingPeers.length > 0 && <div className="lobby-waiting"><strong>Ожидают входа ({waitingPeers.length})</strong>{waitingPeers.map(id => <div key={id} className="participant"><code>{id.slice(0, 8)}</code><button type="button" onClick={() => approveWaiting(id)}>Разрешить вход</button><button type="button" onClick={() => denyWaiting(id)}>Отклонить</button></div>)}</div>}
       {participants.map(participant => { const id = participant.peerId; const member = members.find(item => item.id === participant.userId); return <div key={id} className="participant">{id === selfId ? "Вы" : member?.username ?? "Участник"} <code>{id.slice(0, 8)}</code>{member?.role === "host" || id === hostId ? " • ведущий" : member?.role === "cohost" ? " • со-ведущий" : ""}{hostId === selfId && id !== selfId ? <><button type="button" onClick={() => muteParticipant(id)}>Микрофон</button><button type="button" onClick={() => removeParticipant(id)}>Удалить</button>{member?.role === "cohost" ? <button type="button" onClick={() => changeMemberRole(member.id, "member")}>Снять со-ведущего</button> : <button type="button" onClick={() => changeMemberRole(member?.id ?? "", "cohost")} disabled={!member}>Сделать со-ведущим</button>}</> : null}</div>; })}
-      {hostId === selfId && <button type="button" onClick={() => toggleRoomLock()}>{roomLocked ? "🔓 Открыть комнату" : "🔒 Заблокировать комнату"}</button>}
+      {canModerate && <button type="button" onClick={() => toggleRoomLock()}>{roomLocked ? "🔓 Открыть комнату" : "🔒 Заблокировать комнату"}</button>}
     </aside>
     <section className="chat">
       <strong>Чат</strong>
