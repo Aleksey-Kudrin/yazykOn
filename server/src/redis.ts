@@ -53,6 +53,18 @@ export async function redisListPresence(roomId: string) {
   return keys.map(key => key.slice(`yazykon:presence:${roomId}:`.length));
 }
 
+export async function redisSubscribe(channel: string, handler: (payload: unknown) => void) {
+  const redis = await getRedis();
+  if (!redis) return false;
+  const subscriber = redis.duplicate();
+  subscriber.on("error", error => console.error("Redis subscriber error", error));
+  await subscriber.connect();
+  await subscriber.subscribe(channel, raw => {
+    try { handler(JSON.parse(raw)); } catch { /* ignore malformed pubsub payloads */ }
+  });
+  return true;
+}
+
 export async function redisPublish(channel: string, payload: unknown) {
   const redis = await getRedis();
   if (!redis) return false;
