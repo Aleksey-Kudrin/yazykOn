@@ -4,7 +4,7 @@ interface RoomProps { roomId: string; }
 type SignalMessage =
   | { type: "joined"; roomId: string; peerId: string; data?: { peers: string[]; tracks?: number } }
   | { type: "peer-joined"; peerId: string }
-  | { type: "peer-left"; peerId: string }
+  | { type: "peer-left"; peerId: string }\n  | { type: "track-published"; peerId: string; data?: { trackId?: string } }\n  | { type: "track-removed"; peerId: string; data?: { trackId?: string } }
   | { type: "offer"; data: RTCSessionDescriptionInit }
   | { type: "answer"; data: RTCSessionDescriptionInit }
   | { type: "ice"; data: RTCIceCandidateInit }
@@ -27,7 +27,7 @@ export function Room({ roomId }: RoomProps) {
   const localStream = React.useRef<MediaStream | null>(null);
   const pendingIce = React.useRef<RTCIceCandidateInit[]>([]);
   const pendingLocalIce = React.useRef<RTCIceCandidateInit[]>([]);
-  const remoteStreams = React.useRef(new Map<string, MediaStream>());
+  const remoteStreams = React.useRef(new Map<string, MediaStream>());\n  const remoteOwners = React.useRef(new Map<string, string>());\n  const remoteTrackStreams = React.useRef(new Map<string, string>());
   const [remotes, setRemotes] = React.useState<Array<{ id: string; stream: MediaStream }>>([]);
   const [status, setStatus] = React.useState("Запуск камеры…");
   const [connected, setConnected] = React.useState(false);
@@ -144,7 +144,7 @@ export function Room({ roomId }: RoomProps) {
       socket.current?.close();
       peer.current?.close();
       localStream.current?.getTracks().forEach(t => t.stop());
-      remoteStreams.current.clear();
+      remoteStreams.current.clear();\n      remoteOwners.current.clear();\n      remoteTrackStreams.current.clear();
     };
   }, [roomId]);
 
