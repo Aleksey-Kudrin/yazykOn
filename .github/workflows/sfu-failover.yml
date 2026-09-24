@@ -33,7 +33,7 @@ jobs:
             done
             test "$ready" -eq 1
           done
-      - name: Run failover probe
+      - name: Run failover and load probes
         env:
           SFU_FAILOVER_LIVE: "1"
           SFU_FAILOVER_WAIT_MS: "5000"
@@ -41,11 +41,15 @@ jobs:
           SFU_FAILOVER_SLA_MS: "30000"
           SFU_ROOM_OWNER_TTL: 3s
           SFU_CLUSTER_HEARTBEAT: 1s
+          SFU_LOAD_ROOMS: "3"
+          SFU_LOAD_PARTICIPANTS: "8"
+          SFU_LOAD_CYCLES: "3"
+          SFU_METRICS_SAMPLE_MS: "1000"
           ROOM_ACCESS_SECRET: integration-secret
           REDIS_URL: redis://127.0.0.1:6379
           SFU_PRIMARY_URL: http://127.0.0.1:4100
           SFU_SECONDARY_URL: http://127.0.0.1:4200
-        run: npx playwright test tests/sfu-failover.spec.ts tests/sfu-primary-crash-takeover.spec.ts tests/sfu-cross-node-reconnect.spec.ts tests/sfu-track-recovery.spec.ts tests/sfu-room-ownership.spec.ts tests/sfu-failover-stress.spec.ts tests/sfu-browser-media-failover.spec.ts tests/sfu-multi-participant.spec.ts tests/sfu-failover-stress.spec.ts tests/sfu-load-soak.spec.ts tests/sfu-metrics.spec.ts tests/sfu-failover-latency.spec.ts tests/sfu-failover-sla.spec.ts tests/sfu-concurrent-rooms.spec.ts tests/sfu-redis-outage.spec.ts tests/sfu-redis-cleanup.spec.ts tests/sfu-multi-room-failover.spec.ts tests/sfu-remote-media-failover.spec.ts
+        run: npx playwright test tests/sfu-failover.spec.ts tests/sfu-primary-crash-takeover.spec.ts tests/sfu-cross-node-reconnect.spec.ts tests/sfu-track-recovery.spec.ts tests/sfu-room-ownership.spec.ts tests/sfu-failover-stress.spec.ts tests/sfu-browser-media-failover.spec.ts tests/sfu-multi-participant.spec.ts tests/sfu-load-soak.spec.ts tests/sfu-metrics.spec.ts tests/sfu-failover-latency.spec.ts tests/sfu-failover-sla.spec.ts tests/sfu-concurrent-rooms.spec.ts tests/sfu-redis-outage.spec.ts tests/sfu-redis-cleanup.spec.ts tests/sfu-multi-room-failover.spec.ts tests/sfu-remote-media-failover.spec.ts tests/sfu-failover-load-soak.spec.ts
       - name: Collect failover artifacts
         if: always()
         working-directory: .
@@ -55,6 +59,7 @@ jobs:
           docker compose -p yazykon-sfu-it -f e2e/docker-compose.sfu-failover.yml logs --no-color > e2e/artifacts/sfu.log || true
           curl -fsS http://127.0.0.1:4100/metrics > e2e/artifacts/primary-metrics.txt || true
           curl -fsS http://127.0.0.1:4200/metrics > e2e/artifacts/secondary-metrics.txt || true
+          docker stats --no-stream > e2e/artifacts/docker-stats.txt || true
       - name: Upload failover artifacts
         if: always()
         uses: actions/upload-artifact@v4
