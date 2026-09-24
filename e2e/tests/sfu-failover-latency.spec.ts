@@ -32,7 +32,7 @@ test("SFU failover recovery latency is measured end-to-end", async ({ browser })
   test.skip(!process.env.SFU_FAILOVER_LIVE, "Set SFU_FAILOVER_LIVE=1 for the live Docker run");
 
   const page = await browser.newPage({ permissions: ["camera", "microphone"] });
-  await page.goto(primary + "/health");
+  await health(primary);
 
   const connected = await page.evaluate(async ({ endpoint, roomId, accessToken }) => {
     const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
