@@ -1,3 +1,4 @@
+import { createHmac, randomBytes } from "node:crypto";
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";
@@ -20,6 +21,22 @@ app.get("/api/health", (_req, res) => {
     signaling: "/ws",
     time: new Date().toISOString()
   });
+});
+
+app.get("/api/turn-credentials", (_req, res) => {
+  const secret = process.env.TURN_SECRET;
+  const turnUrl = process.env.TURN_URL;
+  const realm = process.env.TURN_REALM ?? "yazykon.local";
+  if (!secret || !turnUrl) {
+    res.json({ enabled: false });
+    return;
+  }
+
+  const ttl = Math.max(60, Number(process.env.TURN_CREDENTIAL_TTL ?? 3600));
+  const expires = Math.floor(Date.now() / 1000) + ttl;
+  const username = `${expires}:${randomBytes(12).toString("hex")}`;
+  const credential = createHmac("sha1", secret).update(username).digest("base64");
+  res.json({ enabled: true, urls: turnUrl, username, credential, realm, ttl });
 });
 
 app.get("/api", (_req, res) => {
