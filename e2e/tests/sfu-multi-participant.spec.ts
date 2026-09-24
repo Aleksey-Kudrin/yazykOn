@@ -13,7 +13,7 @@ function token(userId: string) {
   return payload + "." + createHmac("sha256", secret).update(payload).digest("base64url");
 }
 
-async function connect(page: import("@playwright/test").Page, userId: string, peerId = "") {
+async function connect(page: import("@playwright/test").Page, userId: string, peerId = "", expectRemoteMedia = false) {
   return page.evaluate(async ({ endpoint, roomId, accessToken, peerId }) => {
     const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
     const pc = new RTCPeerConnection();
@@ -84,7 +84,7 @@ async function connect(page: import("@playwright/test").Page, userId: string, pe
     ws.send(JSON.stringify({ type: "offer", roomId, data: pc.localDescription }));
     const answer = await next("answer");
     await pc.setRemoteDescription(answer.data);
-    if (remoteMediaReady) {
+    if (expectRemoteMedia && remoteMediaReady) {
       await Promise.race([
         remoteMediaReady,
         new Promise((_, reject) => setTimeout(() => reject(new Error("remote media did not produce a video frame")), 10000))
@@ -96,7 +96,7 @@ async function connect(page: import("@playwright/test").Page, userId: string, pe
       remoteTracks,
       localTrackLive: stream.getVideoTracks().every(track => track.readyState === "live")
     };
-  }, { endpoint: primary, roomId, accessToken: token(userId), peerId });
+  }, { endpoint: primary, roomId, accessToken: token(userId), peerId, expectRemoteMedia });
 }
 
 test("three participants receive real remote WebRTC media", async ({ browser }) => {
@@ -109,17 +109,17 @@ test("three participants receive real remote WebRTC media", async ({ browser }) 
   ]);
   await Promise.all(pages.map(page => page.goto(primary + "/health")));
 
-  const first = await connect(pages[0], "p1");
+  const first = await connect(pages[0], "p1", "", false);
   expect(first.peerId).toBeTruthy();
   expect(first.localTrackLive).toBeTruthy();
 
-  const second = await connect(pages[1], "p2");
+  const second = await connect(pages[1], "p2", "", true);
   expect(second.peerId).toBeTruthy();
   expect(second.peerId).not.toBe(first.peerId);
   expect(second.peers).toContain(first.peerId);
   expect(second.remoteTracks).toBeGreaterThan(0);
 
-  const third = await connect(pages[2], "p3");
+  const third = await connect(pages[2], "p3", "", true);
   expect(third.peerId).toBeTruthy();
   expect(third.peerId).not.toBe(first.peerId);
   expect(third.peerId).not.toBe(second.peerId);
