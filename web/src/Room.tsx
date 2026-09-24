@@ -339,7 +339,7 @@ export function Room({ roomId }: RoomProps) {
 
   function moderate(action: string, peerId?: string) {
     const ws = socket.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN || hostId !== selfId) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !canModerate) return;
     ws.send(JSON.stringify({ type: "moderate", roomId, data: { action, ...(peerId ? { peerId } : {}) } }));
   }
 
@@ -352,7 +352,7 @@ export function Room({ roomId }: RoomProps) {
 
   function toggleRoomLock() {
     const ws = socket.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN || hostId !== selfId) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !canModerate) return;
     ws.send(JSON.stringify({ type: "moderate", roomId, data: { action: roomLocked ? "unlock" : "lock" } }));
   }
 
