@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -88,6 +89,8 @@ type PublishedTrack struct {
 }
 
 var (
+	mediaConnMu sync.Mutex
+	mediaConnByIP = map[string]int{}
 	upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
 		if origin == "" { return true }
@@ -241,7 +244,16 @@ func handleChatControl(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(`{"ok":true}`))
 }
 func handleWS(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
+  ip := r.RemoteAddr
+  if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil { ip = host }
+  maxPerIP := 8
+  if raw := os.Getenv("MAX_WS_PER_IP"); raw != "" { if n, err := strconv.Atoi(raw); err == nil && n >= 1 && n <= 100 { maxPerIP = n } }
+  mediaConnMu.Lock()
+  if mediaConnByIP[ip] >= maxPerIP { mediaConnMu.Unlock(); http.Error(w, "too many connections", http.StatusTooManyRequests); return }
+  mediaConnByIP[ip]++
+  mediaConnMu.Unlock()
+  defer func() { mediaConnMu.Lock(); mediaConnByIP[ip]--; if mediaConnByIP[ip] <= 0 { delete(mediaConnByIP, ip) }; mediaConnMu.Unlock() }()
+  conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
