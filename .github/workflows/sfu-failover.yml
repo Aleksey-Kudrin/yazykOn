@@ -81,6 +81,7 @@ jobs:
           curl -fsS http://127.0.0.1:4200/metrics > e2e/artifacts/secondary-metrics.txt || true
           docker stats --no-stream > e2e/artifacts/docker-stats.txt || true
           test -f e2e/artifacts/sfu-chaos-regression-report.json || true
+          test -f e2e/artifacts/sfu-long-soak-report.json || true
       - name: Upload failover artifacts
         if: always()
         uses: actions/upload-artifact@v4
