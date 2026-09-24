@@ -53,7 +53,9 @@ test("SFU load soak: concurrent participants reconnect repeatedly", async ({ bro
     await Promise.all(pages.map(async page => {
       await page.waitForTimeout(holdMs);
       return page.evaluate(async endpoint => {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        const registry = (globalThis as any).__sfuLoadSoakStream as MediaStream | undefined;
+        const stream = registry ?? await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        (globalThis as any).__sfuLoadSoakStream = stream;
         return stream.getVideoTracks().every(track => track.readyState === "live");
       }, target);
     }));
@@ -78,5 +80,10 @@ test("SFU load soak: concurrent participants reconnect repeatedly", async ({ bro
   expect(health[1].cluster).toBeTruthy();
   expect(health[0].nodeId).not.toBe(health[1].nodeId);
 
+  await Promise.all(pages.map(page => page.evaluate(() => {
+    const stream = (globalThis as any).__sfuLoadSoakStream as MediaStream | undefined;
+    if (stream) for (const track of stream.getTracks()) track.stop();
+    (globalThis as any).__sfuLoadSoakStream = undefined;
+  }).catch(() => {})));
   await Promise.all(pages.map(page => page.close()));
 });
