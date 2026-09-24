@@ -6,6 +6,8 @@ const primary = process.env.SFU_PRIMARY_URL ?? "http://127.0.0.1:4100";
 const secondary = process.env.SFU_SECONDARY_URL ?? "http://127.0.0.1:4200";
 const slaMs = Number(process.env.SFU_FAILOVER_SLA_MS ?? 30000);
 const artifactDir = process.env.SFU_ARTIFACT_DIR ?? "artifacts";
+const sampleCount = Math.max(3, Number(process.env.SFU_PERF_SAMPLES ?? 8));
+const sampleIntervalMs = Math.max(100, Number(process.env.SFU_PERF_SAMPLE_INTERVAL_MS ?? 500));
 
 function percentile(values: number[], p: number) {
   if (!values.length) return null;
@@ -32,20 +34,31 @@ test("generate machine-readable SFU performance report", async () => {
   test.skip(!process.env.SFU_FAILOVER_LIVE, "Set SFU_FAILOVER_LIVE=1 for the live Docker failover run");
 
   const samples: number[] = [];
-  const primaryMetrics = await sampleMetrics(primary);
-  const secondaryMetrics = await sampleMetrics(secondary);
+  const primarySamples: number[] = [];
+  const secondarySamples: number[] = [];
+  let primaryMetrics = "";
+  let secondaryMetrics = "";
 
-  for (const value of [
-    metricNumber(primaryMetrics, "sfu_failover_recovery_ms"),
-    metricNumber(secondaryMetrics, "sfu_failover_recovery_ms")
-  ]) {
-    if (value !== null && Number.isFinite(value)) samples.push(value);
+  for (let i = 0; i < sampleCount; i++) {
+    primaryMetrics = await sampleMetrics(primary);
+    secondaryMetrics = await sampleMetrics(secondary);
+    for (const [text, target] of [[primaryMetrics, primarySamples], [secondaryMetrics, secondarySamples]] as const) {
+      const value = metricNumber(text, "sfu_failover_recovery_ms");
+      if (value !== null && Number.isFinite(value) && value >= 0) {
+        samples.push(value);
+        target.push(value);
+      }
+    }
+    if (i + 1 < sampleCount) await new Promise(resolve => setTimeout(resolve, sampleIntervalMs));
   }
 
   const report = {
     generatedAt: new Date().toISOString(),
     target: { primary, secondary },
     sampleCount: samples.length,
+    configuredSamples: sampleCount,
+    sampleIntervalMs,
+    samples: { all: samples, primary: primarySamples, secondary: secondarySamples },
     recoveryMs: {
       p50: percentile(samples, 50),
       p95: percentile(samples, 95),
