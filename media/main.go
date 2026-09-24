@@ -1256,7 +1256,6 @@ func removePeer(p *Peer) {
 		}
 	}
 	clusterSaveRoomState(p.room)
-	}
 	_ = p.pc.Close()
 	if empty {
 		clusterReleaseRoom(p.room.id)
