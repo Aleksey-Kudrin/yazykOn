@@ -86,7 +86,15 @@ async function initDatabase() {
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (room_id, user_id)
   );
-  CREATE INDEX IF NOT EXISTS room_members_user_id_idx ON room_members(user_id);`);
+  CREATE INDEX IF NOT EXISTS room_members_user_id_idx ON room_members(user_id);
+  CREATE TABLE IF NOT EXISTS room_messages (
+    id UUID PRIMARY KEY,
+    room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    text TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS room_messages_room_created_idx ON room_messages(room_id, created_at);`);
 }
 
 function authCookie(sessionId: string) {
@@ -291,6 +299,47 @@ app.get("/api/rooms/:id", async (req, res) => {
     createdAt: new Date(room.created_at).toISOString(),
     requiresPassword: Boolean(room.password_hash && room.password_salt)
   });
+});
+
+app.get("/api/rooms/:id/messages", async (req, res) => {
+  if (!db) { res.status(503).json({ error: "DATABASE_NOT_CONFIGURED" }); return; }
+  const user = await currentUser(req);
+  if (!user) { res.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+  const roomId = req.params.id.toUpperCase();
+  const member = await db.query("SELECT 1 FROM room_members WHERE room_id=$1 AND user_id=$2", [roomId, user.id]);
+  if (!member.rows[0]) { res.status(403).json({ error: "ROOM_MEMBERSHIP_REQUIRED" }); return; }
+  const result = await db.query(
+    "SELECT m.id,m.user_id,m.text,m.created_at,u.username FROM room_messages m JOIN users u ON u.id=m.user_id WHERE m.room_id=$1 ORDER BY m.created_at DESC LIMIT 100",
+    [roomId]
+  );
+  res.json({ messages: result.rows.reverse() });
+});
+
+app.post("/api/rooms/:id/messages", async (req, res) => {
+  if (!db) { res.status(503).json({ error: "DATABASE_NOT_CONFIGURED" }); return; }
+  const user = await currentUser(req);
+  if (!user) { res.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+  const roomId = req.params.id.toUpperCase();
+  const member = await db.query("SELECT 1 FROM room_members WHERE room_id=$1 AND user_id=$2", [roomId, user.id]);
+  if (!member.rows[0]) { res.status(403).json({ error: "ROOM_MEMBERSHIP_REQUIRED" }); return; }
+  const message = typeof req.body?.text === "string" ? req.body.text.trim() : "";
+  if (!message || Array.from(message).length > 2000) { res.status(400).json({ error: "INVALID_MESSAGE" }); return; }
+  const id = randomUUID();
+  const result = await db.query(
+    "INSERT INTO room_messages(id,room_id,user_id,text) VALUES($1,$2,$3,$4) RETURNING id,user_id,text,created_at",
+    [id, roomId, user.id, message]
+  );
+  const row = result.rows[0];
+  if (mediaControlSecret) {
+    try {
+      await fetch(mediaControlUrl.replace(/\/$/, "") + "/control/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + mediaControlSecret },
+        body: JSON.stringify({ roomId, userId: user.id, username: user.username, messageId: row.id, text: row.text, timestamp: new Date(row.created_at).getTime() })
+      });
+    } catch (error) { console.error("media chat sync failed", error); }
+  }
+  res.status(201).json({ id: row.id, userId: row.user_id, username: user.username, text: row.text, timestamp: new Date(row.created_at).getTime() });
 });
 
 app.get("/api/rooms/:id/membership", async (req, res) => {
