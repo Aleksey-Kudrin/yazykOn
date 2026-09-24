@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -12,31 +14,37 @@ import (
 )
 
 type Signal struct {
-	Type   string                     `json:"type"`
-	RoomID string                     `json:"roomId,omitempty"`
-	PeerID string                     `json:"peerId,omitempty"`
-	Data   json.RawMessage            `json:"data,omitempty"`
+	Type   string          `json:"type"`
+	RoomID string          `json:"roomId,omitempty"`
+	PeerID string          `json:"peerId,omitempty"`
+	Data   json.RawMessage `json:"data,omitempty"`
 }
 
 type Peer struct {
-	id      string
-	room    *Room
-	conn    *websocket.Conn
-	pc      *webrtc.PeerConnection
-	mu      sync.Mutex
-	pending bool
+	id       string
+	room     *Room
+	conn     *websocket.Conn
+	pc       *webrtc.PeerConnection
+	mu       sync.Mutex
+	closed   bool
+	published map[string]*webrtc.TrackLocalStaticRTP
 }
 
 type Room struct {
 	id    string
 	mu    sync.RWMutex
 	peers map[string]*Peer
+	tracks map[string]*PublishedTrack
+}
+
+type PublishedTrack struct {
+	ownerID string
+	trackID string
+	local   *webrtc.TrackLocalStaticRTP
 }
 
 var (
-	upgrader = websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool { return true },
-	}
+	upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 	roomsMu sync.Mutex
 	rooms   = map[string]*Room{}
 )
@@ -44,37 +52,32 @@ var (
 func getRoom(id string) *Room {
 	roomsMu.Lock()
 	defer roomsMu.Unlock()
-	r := rooms[id]
-	if r == nil {
-		r = &Room{id: id, peers: make(map[string]*Peer)}
-		rooms[id] = r
-	}
+	if r := rooms[id]; r != nil { return r }
+	r := &Room{id: id, peers: make(map[string]*Peer), tracks: make(map[string]*PublishedTrack)}
+	rooms[id] = r
 	return r
 }
 
 func send(p *Peer, msg Signal) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.closed { return nil }
 	return p.conn.WriteJSON(msg)
 }
 
 func main() {
 	http.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"ok":true,"service":"yazykOn-sfu"}`))
+		_, _ = w.Write([]byte(`{"ok":true,"service":"yazykOn-sfu","version":"0.3.0"}`))
 	})
 	http.HandleFunc("/ws", handleWS)
-
-	addr := ":4000"
-	log.Printf("языкOn custom SFU listening on %s", addr)
-	log.Fatal(http.ListenAndServe(addr, nil))
+	log.Println("языкOn custom SFU listening on :4000")
+	log.Fatal(http.ListenAndServe(":4000", nil))
 }
 
 func handleWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		return
-	}
+	if err != nil { return }
 	defer conn.Close()
 
 	var first Signal
@@ -84,205 +87,130 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	id := first.PeerID
-	if id == "" {
-		id = newID()
-	}
-
-	api := webrtc.SettingEngine{}
-	api.SetICEMulticastDNSMode(webrtc.ICEMulticastDNSModeDisabled)
-
-	me := &Peer{id: id, conn: conn}
-	config := webrtc.Configuration{}
-	pc, err := webrtc.NewAPI(webrtc.WithSettingEngine(api)).NewPeerConnection(config)
-	if err != nil {
-		return
-	}
-	me.pc = pc
+	if id == "" { id = newID() }
+	api := webrtc.NewAPI()
+	pc, err := api.NewPeerConnection(webrtc.Configuration{})
+	if err != nil { return }
 
 	room := getRoom(first.RoomID)
-	me.room = room
+	me := &Peer{id: id, room: room, conn: conn, pc: pc, published: make(map[string]*webrtc.TrackLocalStaticRTP)}
 
 	room.mu.Lock()
 	room.peers[id] = me
 	others := make([]*Peer, 0, len(room.peers)-1)
-	for pid, p := range room.peers {
-		if pid != id {
-			others = append(others, p)
-		}
-	}
+	for pid, p := range room.peers { if pid != id { others = append(others, p) } }
+	tracks := make([]*PublishedTrack, 0, len(room.tracks))
+	for _, t := range room.tracks { tracks = append(tracks, t) }
 	room.mu.Unlock()
 
 	pc.OnICECandidate(func(c *webrtc.ICECandidate) {
-		if c == nil {
-			return
-		}
+		if c == nil { return }
 		b, _ := json.Marshal(c.ToJSON())
-		_ = send(me, Signal{Type: "ice", PeerID: "", Data: b})
+		_ = send(me, Signal{Type: "ice", Data: b})
 	})
 
 	pc.OnTrack(func(track *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
-		log.Printf("peer=%s published kind=%s id=%s", id, track.Kind(), track.ID())
+		codec := track.Codec()
+		local, err := webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{
+			MimeType: codec.MimeType, ClockRate: codec.ClockRate, Channels: codec.Channels, SDPFmtpLine: codec.SDPFmtpLine,
+		}, track.ID(), id)
+		if err != nil { log.Printf("track %s: %v", track.ID(), err); return }
 
-		local, err := webrtc.NewTrackLocalStaticRTP(
-			webrtc.RTPCodecCapability{
-				MimeType:  track.Codec().MimeType,
-				ClockRate: track.Codec().ClockRate,
-				Channels:  track.Codec().Channels,
-				SDPFmtpLine: track.Codec().SDPFmtpLine,
-			},
-			track.ID(),
-			id,
-		)
-		if err != nil {
-			return
-		}
+		publishedID := id + ":" + track.ID()
+		room.mu.Lock()
+		room.tracks[publishedID] = &PublishedTrack{ownerID: id, trackID: track.ID(), local: local}
+		room.mu.Unlock()
 
-		room.mu.RLock()
-		targets := make([]*Peer, 0, len(room.peers))
-		for _, p := range room.peers {
-			if p.id != id {
-				targets = append(targets, p)
-			}
-		}
-		room.mu.RUnlock()
-
-		for _, target := range targets {
-			if _, err := target.pc.AddTrack(local); err != nil {
-				log.Printf("add track to %s: %v", target.id, err)
-				continue
-			}
-			renegotiate(target)
+		for _, target := range othersSnapshot(room, id) {
+			if _, err := target.pc.AddTrack(local); err == nil { renegotiate(target) }
 		}
 
 		buf := make([]byte, 1500)
 		for {
-			n, _, err := track.Read(buf)
-			if err != nil {
-				return
-			}
+			n, _, readErr := track.Read(buf)
+			if readErr != nil { break }
 			var pkt rtp.Packet
-			if err := pkt.Unmarshal(buf[:n]); err != nil {
-				continue
-			}
-			_, _ = local.WriteRTP(&pkt)
+			if pktErr := pkt.Unmarshal(buf[:n]); pktErr == nil { _, _ = local.WriteRTP(&pkt) }
 		}
+
+		room.mu.Lock()
+		delete(room.tracks, publishedID)
+		room.mu.Unlock()
 	})
+
+	// Add every stream already published in this room to the newcomer.
+	for _, t := range tracks {
+		if t.ownerID == id { continue }
+		if _, err := pc.AddTrack(t.local); err != nil { log.Printf("initial track %s: %v", t.trackID, err) }
+	}
 
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		if state == webrtc.PeerConnectionStateFailed ||
-			state == webrtc.PeerConnectionStateClosed {
-			removePeer(me)
-		}
+		if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed { removePeer(me) }
 	})
 
-	b, _ := json.Marshal(map[string]any{"peers": peerIDs(others)})
+	b, _ := json.Marshal(map[string]any{"peers": peerIDs(others), "tracks": len(tracks)})
 	_ = send(me, Signal{Type: "joined", RoomID: room.id, PeerID: id, Data: b})
-
-	for _, other := range others {
-		_ = send(other, Signal{Type: "peer-joined", PeerID: id})
-	}
+	for _, other := range others { _ = send(other, Signal{Type: "peer-joined", PeerID: id}) }
+	if len(tracks) > 0 { renegotiate(me) }
 
 	for {
 		var msg Signal
-		if err := conn.ReadJSON(&msg); err != nil {
-			break
-		}
+		if err := conn.ReadJSON(&msg); err != nil { break }
 		switch msg.Type {
 		case "offer", "answer":
 			var desc webrtc.SessionDescription
-			if err := json.Unmarshal(msg.Data, &desc); err != nil {
-				continue
-			}
+			if json.Unmarshal(msg.Data, &desc) != nil { continue }
 			if msg.Type == "offer" {
-				if err := pc.SetRemoteDescription(desc); err != nil {
-					continue
-				}
-				answer, err := pc.CreateAnswer(nil)
-				if err != nil {
-					continue
-				}
-				if err = pc.SetLocalDescription(answer); err != nil {
-					continue
-				}
+				if pc.SetRemoteDescription(desc) != nil { continue }
+				answer, e := pc.CreateAnswer(nil); if e != nil { continue }
+				if pc.SetLocalDescription(answer) != nil { continue }
 				b, _ := json.Marshal(pc.LocalDescription())
 				_ = send(me, Signal{Type: "answer", Data: b})
-			} else {
-				_ = pc.SetRemoteDescription(desc)
-			}
+			} else { _ = pc.SetRemoteDescription(desc) }
 		case "ice":
 			var candidate webrtc.ICECandidateInit
-			if err := json.Unmarshal(msg.Data, &candidate); err == nil {
-				_ = pc.AddICECandidate(candidate)
-			}
+			if json.Unmarshal(msg.Data, &candidate) == nil { _ = pc.AddICECandidate(candidate) }
 		}
 	}
-
 	removePeer(me)
 }
 
+func othersSnapshot(room *Room, self string) []*Peer {
+	room.mu.RLock(); defer room.mu.RUnlock()
+	out := make([]*Peer, 0, len(room.peers))
+	for id, p := range room.peers { if id != self { out = append(out, p) } }
+	return out
+}
+
 func renegotiate(p *Peer) {
-	p.mu.Lock()
-	if p.pending {
-		p.mu.Unlock()
-		return
-	}
-	p.pending = true
-	p.mu.Unlock()
-
+	p.mu.Lock(); closed := p.closed; p.mu.Unlock()
+	if closed { return }
 	go func() {
-		defer func() {
-			p.mu.Lock()
-			p.pending = false
-			p.mu.Unlock()
-		}()
-
-		offer, err := p.pc.CreateOffer(nil)
-		if err != nil {
-			return
-		}
-		if err = p.pc.SetLocalDescription(offer); err != nil {
-			return
-		}
+		offer, err := p.pc.CreateOffer(nil); if err != nil { return }
+		if err = p.pc.SetLocalDescription(offer); err != nil { return }
 		b, _ := json.Marshal(p.pc.LocalDescription())
 		_ = send(p, Signal{Type: "offer", Data: b})
 	}()
 }
 
 func removePeer(p *Peer) {
-	if p.room == nil {
-		return
-	}
+	p.mu.Lock()
+	if p.closed { p.mu.Unlock(); return }
+	p.closed = true
+	p.mu.Unlock()
+	if p.room == nil { return }
 	p.room.mu.Lock()
 	delete(p.room.peers, p.id)
+	for id, t := range p.room.tracks { if t.ownerID == p.id { delete(p.room.tracks, id) } }
 	remaining := make([]*Peer, 0, len(p.room.peers))
-	for _, other := range p.room.peers {
-		remaining = append(remaining, other)
-	}
+	for _, other := range p.room.peers { remaining = append(remaining, other) }
+	empty := len(p.room.peers) == 0
 	p.room.mu.Unlock()
-
-	for _, other := range remaining {
-		_ = send(other, Signal{Type: "peer-left", PeerID: p.id})
-	}
+	for _, other := range remaining { _ = send(other, Signal{Type: "peer-left", PeerID: p.id}) }
 	_ = p.pc.Close()
+	if empty { roomsMu.Lock(); delete(rooms, p.room.id); roomsMu.Unlock() }
 }
 
-func peerIDs(peers []*Peer) []string {
-	ids := make([]string, 0, len(peers))
-	for _, p := range peers {
-		ids = append(ids, p.id)
-	}
-	return ids
-}
+func peerIDs(peers []*Peer) []string { ids := make([]string, 0, len(peers)); for _, p := range peers { ids = append(ids, p.id) }; return ids }
 
-func newID() string {
-	return "p-" + randomToken()
-}
-
-func randomToken() string {
-	const chars = "abcdefghijklmnopqrstuvwxyz0123456789"
-	b := make([]byte, 10)
-	for i := range b {
-		b[i] = chars[i%len(chars)]
-	}
-	return string(b)
-}
+func newID() string { b := make([]byte, 8); if _, err := rand.Read(b); err != nil { return "p-unknown" }; return "p-" + hex.EncodeToString(b) }
