@@ -5,6 +5,7 @@ services:
     restart: unless-stopped
     environment:
       PORT: 3000
+      DATABASE_URL: postgres://yazykon:yazykon@postgres:5432/yazykon
       TURN_SECRET: ${TURN_SECRET:-}
       TURN_REALM: ${TURN_REALM:-yazykon.local}
       TURN_URL: ${TURN_URL:-}
@@ -13,6 +14,24 @@ services:
       ROOM_ACCESS_TTL: ${ROOM_ACCESS_TTL:-86400}
     expose:
       - "3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: yazykon
+      POSTGRES_USER: yazykon
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-CHANGE_ME}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yazykon -d yazykon"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   media:
     build:
@@ -86,3 +105,4 @@ services:
 volumes:
   caddy_data:
   caddy_config:
+  postgres_data:
