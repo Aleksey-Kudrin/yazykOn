@@ -39,7 +39,8 @@ jobs:
           SFU_FAILOVER_WAIT_MS: "5000"
           SFU_SLA_CYCLES: "4"
           SFU_FAILOVER_SLA_MS: "30000"
-          SFU_ROOM_OWNER_TTL_MS: "3000"
+          SFU_ROOM_OWNER_TTL: 3s
+          SFU_CLUSTER_HEARTBEAT: 1s
           ROOM_ACCESS_SECRET: integration-secret
           REDIS_URL: redis://127.0.0.1:6379
           SFU_PRIMARY_URL: http://127.0.0.1:4100
