@@ -24,6 +24,7 @@ interface Client {
   roomId: string;
   peerId: string;
   sessionId: string;
+  replaced: boolean;
 }
 
 interface SignalMessage {
@@ -87,6 +88,7 @@ async function ensureRoomSubscription(roomId: string) {
     if (event.type === "peer-replaced" && event.targetNodeId === NODE_ID && event.targetSessionId) {
       const target = [...room.values()].find(client => client.sessionId === event.targetSessionId && client.peerId === event.peerId);
       if (target) {
+        target.replaced = true;
         send(target.socket, { type: "session-replaced", peerId: target.peerId });
         target.socket.close(4001, "session-replaced");
       }
@@ -157,11 +159,12 @@ export function attachSignaling(server: HttpServer) {
         const room = localRoom(roomId);
         const existing = room.get(peerId);
         if (existing) {
+          existing.replaced = true;
           send(existing.socket, { type: "session-replaced", peerId });
           existing.socket.close(4001, "session-replaced");
         }
 
-        client = { socket, roomId, peerId, sessionId: randomUUID() };
+        client = { socket, roomId, peerId, sessionId: randomUUID(), replaced: false };
         room.set(peerId, client);
 
         void (async () => {
@@ -229,11 +232,15 @@ export function attachSignaling(server: HttpServer) {
       }
 
       current.delete(client.peerId);
-      for (const other of current.values()) send(other.socket, { type: "peer-left", peerId: client.peerId });
-      if (current.size === 0) rooms.delete(client.roomId);
-
-      void publishRoomEvent(client.roomId, { type: "peer-left", peerId: client.peerId })
-        .finally(() => unregisterClient(client));
+      if (!client.replaced) {
+        for (const other of current.values()) send(other.socket, { type: "peer-left", peerId: client.peerId });
+        if (current.size === 0) rooms.delete(client.roomId);
+        void publishRoomEvent(client.roomId, { type: "peer-left", peerId: client.peerId })
+          .finally(() => unregisterClient(client));
+      } else {
+        if (current.size === 0) rooms.delete(client.roomId);
+        void unregisterClient(client);
+      }
     });
   });
 
