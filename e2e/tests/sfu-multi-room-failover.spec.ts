@@ -248,31 +248,6 @@ test("multiple active rooms transfer ownership and reconnect on secondary", asyn
       activeTracks: deltas.activeTracks === null || deltas.activeTracks <= maxTrackDelta
     };
 
-    const report = {
-      generatedAt: new Date().toISOString(),
-      rooms, roomIds,
-      failoverMs: Date.now() - failoverStarted,
-      reconnectMs,
-      metricsBefore,
-      metricsAfter,
-      redisAfter,
-      ownersBefore: before.map(item => item.value),
-      ownersAfter: after,
-      reconnectResults,
-      reverseResults,
-      media: { initial: initialMedia, recovered: recoveredMedia, reverse: reverseMedia },
-      reverseFailoverMs: reverseMs,
-      deltas,
-      budgets: { maxActivePeerDelta, maxRoomDelta, maxTrackDelta },
-      resourceChecks,
-      pass: reconnectResults.every((item, i) => item.peerId === joined[i].peerId)
-        && redisAfter.every(item => item.owner === 1 && item.state === 1)
-        && reverseResults.every((item, i) => item.peerId === joined[i].peerId)
-        && reverseRedis.every(item => item.owner === 1 && item.state === 1)
-        && Object.values(resourceChecks).every(Boolean)
-    };
-    fs.mkdirSync(artifactDir, { recursive: true });
-    fs.writeFileSync(path.join(artifactDir, "sfu-multi-room-failover-report.json"), JSON.stringify(report, null, 2));
     expect(Object.values(resourceChecks).every(Boolean)).toBeTruthy();
 
     // Reverse failover validates that the recovered media sessions are not
@@ -310,6 +285,33 @@ test("multiple active rooms transfer ownership and reconnect on secondary", asyn
       expect(recoveredMedia[i]?.trackIds).toEqual(initialMedia[i]?.trackIds);
       expect(reverseMedia[i]?.trackIds).toEqual(initialMedia[i]?.trackIds);
     }
+
+    const report = {
+      generatedAt: new Date().toISOString(),
+      rooms, roomIds,
+      failoverMs: Date.now() - failoverStarted,
+      reconnectMs,
+      metricsBefore,
+      metricsAfter,
+      redisAfter,
+      ownersBefore: before.map(item => item.value),
+      ownersAfter: after,
+      reconnectResults,
+      reverseResults,
+      media: { initial: initialMedia, recovered: recoveredMedia, reverse: reverseMedia },
+      reverseFailoverMs: reverseMs,
+      deltas,
+      budgets: { maxActivePeerDelta, maxRoomDelta, maxTrackDelta },
+      resourceChecks,
+      reverseRedis,
+      pass: reconnectResults.every((item, i) => item.peerId === joined[i].peerId)
+        && redisAfter.every(item => item.owner === 1 && item.state === 1)
+        && reverseResults.every((item, i) => item.peerId === joined[i].peerId)
+        && reverseRedis.every(item => item.owner === 1 && item.state === 1)
+        && Object.values(resourceChecks).every(Boolean)
+    };
+    fs.mkdirSync(artifactDir, { recursive: true });
+    fs.writeFileSync(path.join(artifactDir, "sfu-multi-room-failover-report.json"), JSON.stringify(report, null, 2));
   } finally {
     execFileSync("docker", ["compose", "-f", composeFile, "start", "sfu-primary"], { stdio: "inherit" });
     await waitHealth(primary);
