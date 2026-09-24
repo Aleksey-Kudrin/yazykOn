@@ -67,6 +67,26 @@ export async function redisSubscribe(channel: string, handler: (payload: unknown
   return true;
 }
 
+export async function redisClaimRoom(roomId: string, nodeId: string, ttlSeconds = 30) {
+  const redis = await getRedis();
+  if (!redis) return null;
+  const key = `yazykon:room-owner:${roomId}`;
+  const claimed = await redis.set(key, nodeId, { NX: true, EX: ttlSeconds });
+  if (claimed === "OK") return nodeId;
+  const owner = await redis.get(key);
+  return owner === nodeId ? nodeId : owner;
+}
+
+export async function redisReleaseRoom(roomId: string, nodeId: string) {
+  const redis = await getRedis();
+  if (!redis) return false;
+  const key = `yazykon:room-owner:${roomId}`;
+  const owner = await redis.get(key);
+  if (owner !== nodeId) return false;
+  await redis.del(key);
+  return true;
+}
+
 export async function redisPublish(channel: string, payload: unknown) {
   const redis = await getRedis();
   if (!redis) return false;
