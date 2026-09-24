@@ -62,6 +62,7 @@ export function Room({ roomId }: RoomProps) {
   const iceRestarting = React.useRef(false);
   const reconnectTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttempt = React.useRef(0);
+  const reconnecting = React.useRef(false);
   const [chat, setChat] = React.useState<ChatMessage[]>([]);
   const [chatText, setChatText] = React.useState("");
   const [members, setMembers] = React.useState<RoomMember[]>([]);
@@ -157,6 +158,8 @@ export function Room({ roomId }: RoomProps) {
         const ws = new WebSocket(mediaUrl());
         socket.current = ws;
         ws.onopen = async () => {
+          reconnectAttempt.current = 0;
+          reconnecting.current = false;
           setStatus("Подключено к языкOn SFU");
           ws.send(JSON.stringify({ type: "join", roomId, data: { accessToken } }));
           for (const candidate of pendingLocalIce.current) {
@@ -300,7 +303,11 @@ export function Room({ roomId }: RoomProps) {
           const delay = Math.min(30000, 1000 * 2 ** attempt);
           setStatus(`SFU отключён — переподключение через ${Math.ceil(delay / 1000)} с…`);
           if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
-          reconnectTimer.current = setTimeout(() => window.location.reload(), delay);
+          reconnectTimer.current = setTimeout(() => {
+            if (stopped || reconnecting.current) return;
+            reconnecting.current = true;
+            window.location.reload();
+          }, delay);
         };
       } catch (error) { console.error(error); setStatus("Нет доступа к камере или микрофону"); }
     }
