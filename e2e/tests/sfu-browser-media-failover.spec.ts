@@ -224,5 +224,78 @@ test("browser WebRTC media survives SFU A loss and republishes on SFU B", async 
   expect(republished!.sessionId).not.toBe(oldSession);
   expect(republished!.trackId).toBeTruthy();
 
+  // Exercise the reverse direction as well: bring SFU A back, stop B,
+  // let B's lease expire, and reconnect the same stable peer to A.
+  execFileSync("docker", ["compose", "-f", composeFile, "start", "sfu-primary"], { stdio: "inherit" });
+  for (let attempt = 0; attempt < 30; attempt++) {
+    try {
+      const health = await fetch(primary + "/health");
+      if (health.ok) break;
+    } catch {}
+    await new Promise(resolve => setTimeout(resolve, 500));
+    if (attempt === 29) throw new Error("SFU primary did not recover");
+  }
+
+  const beforeReverse = await redisStates();
+  const secondarySession = beforeReverse.find(track => track.peerId === result.peerId && track.kind === "video")?.sessionId;
+  expect(secondarySession).toBe(republished!.sessionId);
+
+  execFileSync("docker", ["compose", "-f", composeFile, "stop", "sfu-secondary"], { stdio: "inherit" });
+  await page.waitForTimeout(ttlMs + 2000);
+
+  const reverse = await page.evaluate(async ({ primary, roomId, authToken, peerId }) => {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    const track = stream.getVideoTracks()[0];
+    if (!track || track.readyState !== "live") throw new Error("reverse failover camera track is not live");
+    const pc = new RTCPeerConnection();
+    pc.addTrack(track, stream);
+    const ws = new WebSocket(primary.replace(/^http/, "ws") + "/ws");
+    const queue: any[] = [];
+    let waiter: ((value: any) => void) | undefined;
+    ws.onmessage = event => {
+      const message = JSON.parse(event.data);
+      if (waiter) { const resolve = waiter; waiter = undefined; resolve(message); }
+      else queue.push(message);
+    };
+    const next = (type: string) => new Promise<any>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("timeout: " + type)), 15000);
+      const take = (message: any) => {
+        if (message.type === type) { clearTimeout(timer); resolve(message); }
+        else waiter = take;
+      };
+      const index = queue.findIndex(message => message.type === type);
+      if (index >= 0) {
+        const message = queue.splice(index, 1)[0];
+        clearTimeout(timer);
+        resolve(message);
+      } else waiter = take;
+    });
+    await new Promise<void>((resolve, reject) => {
+      ws.onopen = () => resolve();
+      ws.onerror = () => reject(new Error("reverse primary websocket failed"));
+    });
+    ws.send(JSON.stringify({
+      type: "join",
+      roomId,
+      peerId,
+      data: { accessToken: authToken, reconnect: true }
+    }));
+    const joined = await next("joined");
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    ws.send(JSON.stringify({ type: "offer", roomId, data: pc.localDescription }));
+    await next("answer");
+    return { peerId: joined.peerId, trackReady: track.readyState === "live" };
+  }, { primary, roomId, authToken, peerId: result.peerId });
+
+  expect(reverse.peerId).toBe(result.peerId);
+  expect(reverse.trackReady).toBeTruthy();
+  await page.waitForTimeout(1000);
+  const afterReverse = await redisStates();
+  const finalTrack = afterReverse.find(track => track.peerId === result.peerId && track.kind === "video");
+  expect(finalTrack).toBeTruthy();
+  expect(finalTrack!.sessionId).not.toBe(secondarySession);
+  expect(finalTrack!.trackId).toBeTruthy();
+
   await page.close();
 });
