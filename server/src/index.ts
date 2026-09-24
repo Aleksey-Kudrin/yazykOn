@@ -27,6 +27,8 @@ const allowedOrigins = new Set(
 const authRate = new Map<string, { count: number; resetAt: number }>();
 const roomRate = new Map<string, { count: number; resetAt: number }>();
 const breakoutManager = new BreakoutManager();
+const RATE_WINDOW_MS = 60_000;
+const AUDIT_RETENTION_DAYS = Math.max(1, Number(process.env.AUDIT_RETENTION_DAYS ?? 90) || 90);
 
 function requestIp(req: express.Request) {
   return req.socket.remoteAddress ?? "unknown";
@@ -163,8 +165,8 @@ app.use(cors({
   credentials: true
 }));
 app.use(express.json({ limit: "32kb" }));
-app.use("/api/auth", rateLimit(authRate, 30, 60_000));
-app.use("/api/rooms", rateLimit(roomRate, 60, 60_000));
+app.use("/api/auth", rateLimit(authRate, 30, RATE_WINDOW_MS));
+app.use("/api/rooms", rateLimit(roomRate, 60, RATE_WINDOW_MS));
 
 app.get("/health", (_req, res) => res.json({ ok: true, service: "yazykOn-server" }));
 app.get("/ready", async (_req, res) => {
@@ -613,6 +615,11 @@ initDatabase().then(() => {
   if (db) {
     const cleanup = setInterval(() => {
       void db.query("DELETE FROM sessions WHERE expires_at <= now()").catch(error => console.error("session cleanup failed", error));
+      void db.query("DELETE FROM audit_events WHERE created_at < now() - make_interval(days => $1)", [AUDIT_RETENTION_DAYS])
+        .catch(error => console.error("audit cleanup failed", error));
+      const now = Date.now();
+      for (const [key, value] of authRate) if (value.resetAt <= now) authRate.delete(key);
+      for (const [key, value] of roomRate) if (value.resetAt <= now) roomRate.delete(key);
     }, 60 * 60 * 1000);
     cleanup.unref();
   }
