@@ -134,3 +134,23 @@ func TestVerifyRoomAccessTokenRejectsTamperingAndWrongRole(t *testing.T) {
 	if _, ok := verifyRoomAccessToken("ROOM1", invalid); ok { t.Fatal("invalid role accepted") }
 	if _, ok := verifyRoomAccessToken("ROOM2", token); ok { t.Fatal("wrong room accepted") }
 }
+
+
+func TestModerationAuthorization(t *testing.T) {
+  host := &Peer{role: "host"}
+  cohost := &Peer{role: "cohost"}
+  member := &Peer{role: "member"}
+  targetHost := &Peer{role: "host"}
+  if !canModerate(host, targetHost, "remove") { t.Fatal("host should moderate host") }
+  if canModerate(cohost, targetHost, "remove") { t.Fatal("cohost must not remove host") }
+  if canModerate(member, nil, "mute") { t.Fatal("member must not moderate") }
+  if !canModerate(cohost, nil, "lock") { t.Fatal("cohost should lock room") }
+  if canModerate(host, nil, "invalid") { t.Fatal("unknown moderation action accepted") }
+}
+
+func TestNegotiationFinishedQueuesPendingRenegotiation(t *testing.T) {
+  p := &Peer{negotiating: true, negotiationPending: true}
+  negotiationFinished(p)
+  if p.negotiating { t.Fatal("negotiation should be marked finished") }
+  if p.negotiationPending { t.Fatal("pending flag should be consumed") }
+}
