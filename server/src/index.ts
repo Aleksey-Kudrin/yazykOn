@@ -573,6 +573,7 @@ app.patch("/api/rooms/:id/members/:userId", async (req, res) => {
   if (req.params.userId === user.id) { res.status(400).json({ error: "CANNOT_CHANGE_OWNER" }); return; }
   const result = await db.query("UPDATE room_members SET role=$1 WHERE room_id=$2 AND user_id=$3 RETURNING role", [role,roomId,req.params.userId]);
   if (!result.rows[0]) { res.status(404).json({ error: "MEMBER_NOT_FOUND" }); return; }
+  void writeAuditEvent({ userId: user.id, roomId, action: "room.member.role_change", targetUserId: req.params.userId, ip: requestIp(req) });
   if (mediaControlSecret) {
     try {
       await fetch(mediaControlUrl.replace(/\\/$/, "") + "/control/role", {
@@ -584,6 +585,26 @@ app.patch("/api/rooms/:id/members/:userId", async (req, res) => {
   }
   res.json({ role: result.rows[0].role });
 });
+
+app.get("/api/rooms/:id/audit", async (req, res) => {
+  if (!db) { res.status(503).json({ error: "DATABASE_NOT_CONFIGURED" }); return; }
+  const user = await currentUser(req);
+  if (!user) { res.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+  const roomId = req.params.id.toUpperCase();
+  const owner = await db.query("SELECT owner_id FROM rooms WHERE id=$1", [roomId]);
+  if (!owner.rows[0]) { res.status(404).json({ error: "ROOM_NOT_FOUND" }); return; }
+  if (owner.rows[0].owner_id !== user.id) { res.status(403).json({ error: "OWNER_REQUIRED" }); return; }
+  const rawLimit = Number(req.query.limit ?? 100);
+  const limit = Number.isFinite(rawLimit) ? Math.min(500, Math.max(1, Math.floor(rawLimit))) : 100;
+  const result = await db.query(
+    `SELECT a.id,a.action,a.user_id,a.target_user_id,a.ip,a.created_at,u.username
+     FROM audit_events a LEFT JOIN users u ON u.id=a.user_id
+     WHERE a.room_id=$1 ORDER BY a.created_at DESC LIMIT $2`,
+    [roomId, limit]
+  );
+  res.json({ events: result.rows });
+});
+
 const server = createServer(app);
 attachSignaling(server);
 
