@@ -754,7 +754,7 @@ func replacePeerSession(old *Peer, room *Room) {
 	room.mu.Unlock()
 
 	for _, track := range removedTrackStates {
-		clusterRemoveTrackState(p.room.id, track.ownerID, track.trackID, track.sessionID)
+		clusterRemoveTrackState(room.id, track.ownerID, track.trackID, track.sessionID)
 	}
 	for _, other := range remaining {
 		for _, publishedID := range removedTracks {
