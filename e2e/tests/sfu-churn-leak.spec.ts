@@ -1,10 +1,13 @@
 import { createHmac } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { test, expect } from "@playwright/test";
 
 const endpoint = process.env.SFU_PRIMARY_URL ?? "http://127.0.0.1:4100";
 const redisUrl = process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
 const secret = process.env.ROOM_ACCESS_SECRET ?? "integration-secret";
 const rounds = Math.max(5, Number(process.env.SFU_CHURN_ROUNDS ?? 12));
+const artifactDir = process.env.SFU_ARTIFACT_DIR ?? "artifacts";
 
 function token(roomId: string, userId: string) {
   const payload = Buffer.from(JSON.stringify({
@@ -53,6 +56,8 @@ test("SFU repeated room churn leaves no Redis peer/session state", async () => {
   await client.connect();
 
   const roomIds: string[] = [];
+  const cleanupMs: number[] = [];
+  const started = Date.now();
   try {
     for (let i = 0; i < rounds; i++) {
       const roomId = `CHURN-LEAK-${Date.now()}-${i}`;
@@ -63,16 +68,20 @@ test("SFU repeated room churn leaves no Redis peer/session state", async () => {
 
     for (const roomId of roomIds) {
       let cleaned = false;
+      const cleanupStarted = Date.now();
       for (let attempt = 0; attempt < 40; attempt++) {
         const keys = await roomKeys(client, roomId);
         if (keys.owner === 0 && keys.state === 0 && keys.tracks === 0 && keys.peers.length === 0) {
           cleaned = true;
+          cleanupMs.push(Date.now() - cleanupStarted);
           break;
         }
         await new Promise(resolve => setTimeout(resolve, 250));
       }
       expect(cleaned, `Redis state leaked for ${roomId}`).toBeTruthy();
     }
+    fs.mkdirSync(artifactDir, { recursive: true });
+    fs.writeFileSync(path.join(artifactDir, "sfu-churn-leak-report.json"), JSON.stringify({ rounds, rooms: roomIds.length, durationMs: Date.now() - started, cleanupMs, maxCleanupMs: Math.max(0, ...cleanupMs), pass: cleanupMs.length === roomIds.length }, null, 2));
   } finally {
     for (const roomId of roomIds) {
       const keys = await roomKeys(client, roomId);
