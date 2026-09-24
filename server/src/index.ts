@@ -379,7 +379,7 @@ app.post("/api/rooms/:id/breakouts", async (req, res) => {
   const name = typeof req.body?.name === "string" ? req.body.name.trim().slice(0, 100) : "";
   if (!name) { res.status(400).json({ error: "INVALID_BREAKOUT_NAME" }); return; }
   const id = randomBytes(5).toString("base64url").slice(0, 8).toUpperCase();
-  const breakout = breakoutManager.create(id, name);
+  const breakout = breakoutManager.Create(id, name);
   res.status(201).json({ id: breakout.id, name: breakout.name, participants: [] });
 });
 
@@ -390,7 +390,7 @@ app.get("/api/rooms/:id/breakouts", async (req, res) => {
   const roomId = req.params.id.toUpperCase();
   const member = await db.query("SELECT 1 FROM room_members WHERE room_id=$1 AND user_id=$2", [roomId, user.id]);
   if (!member.rows[0]) { res.status(403).json({ error: "ROOM_MEMBERSHIP_REQUIRED" }); return; }
-  res.json({ rooms: breakoutManager.list().map(r => ({ id: r.id, name: r.name, participants: Object.keys(r.participants) })) });
+  res.json({ rooms: breakoutManager.List().map(r => ({ id: r.id, name: r.name, participants: Object.keys(r.participants) })) });
 });
 
 app.get("/api/rooms/:id/membership", async (req, res) => {
