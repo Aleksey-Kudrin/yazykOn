@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 
 	"github.com/gorilla/websocket"
+	"github.com/pion/ice/v4"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 )
@@ -60,11 +63,26 @@ var (
 
 func newPeerConnection() (*webrtc.PeerConnection, error) {
 	settings := webrtc.SettingEngine{}
+	if publicIPs := envList("WEBRTC_PUBLIC_IP"); len(publicIPs) > 0 {
+		settings.SetNAT1To1IPs(publicIPs, webrtc.ICECandidateTypeHost)
+		settings.SetICEMulticastDNSMode(ice.MulticastDNSModeDisabled)
+	}
 	if err := settings.SetEphemeralUDPPortRange(mediaUDPMin, mediaUDPMax); err != nil {
 		return nil, err
 	}
 	api := webrtc.NewAPI(webrtc.WithSettingEngine(settings))
 	return api.NewPeerConnection(webrtc.Configuration{})
+}
+
+func envList(name string) []string {
+	var values []string
+	for _, value := range strings.Split(os.Getenv(name), ",") {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
 }
 
 func getRoom(id string) *Room {
@@ -94,7 +112,7 @@ func main() {
 	})
 	http.HandleFunc("/ws", handleWS)
 
-	log.Println("языкOn custom SFU listening on :4000, media UDP :50000-50100")
+	log.Printf("языкOn custom SFU listening on :4000, media UDP :50000-50100, public ICE IPs: %v", envList("WEBRTC_PUBLIC_IP"))
 	log.Fatal(http.ListenAndServe(":4000", nil))
 }
 
