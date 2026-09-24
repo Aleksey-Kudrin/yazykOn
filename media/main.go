@@ -41,6 +41,7 @@ type Signal struct {
 
 type JoinData struct {
 	AccessToken string `json:"accessToken"`
+	Reconnect   bool   `json:"reconnect,omitempty"`
 }
 
 type AccessClaims struct {
@@ -279,6 +280,52 @@ func handleChatControl(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write([]byte(`{"ok":true}`))
 }
+func replacePeerSession(old *Peer, room *Room) {
+	old.mu.Lock()
+	if old.closed {
+		old.mu.Unlock()
+		return
+	}
+	old.closed = true
+	old.negotiating = false
+	old.negotiationPending = false
+	old.mu.Unlock()
+
+	room.mu.Lock()
+	if current := room.peers[old.id]; current != old {
+		room.mu.Unlock()
+		return
+	}
+	delete(room.peers, old.id)
+	removedTracks := make([]string, 0)
+	for id, track := range room.tracks {
+		if track.ownerID == old.id {
+			removedTracks = append(removedTracks, id)
+			delete(room.tracks, id)
+		}
+	}
+	remaining := make([]*Peer, 0, len(room.peers))
+	for _, other := range room.peers {
+		if !other.waiting {
+			remaining = append(remaining, other)
+		}
+	}
+	room.mu.Unlock()
+
+	for _, other := range remaining {
+		for _, publishedID := range removedTracks {
+			if removeSubscription(other, publishedID) {
+				trackID := publishedID
+				if index := strings.LastIndex(publishedID, ":"); index >= 0 { trackID = publishedID[index+1:] }
+				_ = send(other, Signal{Type: "track-removed", PeerID: old.id, Data: mustJSON(map[string]string{"trackId": trackID})})
+				renegotiate(other)
+			}
+		}
+	}
+	_ = old.pc.Close()
+	_ = old.conn.Close()
+}
+
 func handleWS(w http.ResponseWriter, r *http.Request) {
   ip := r.RemoteAddr
   if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil { ip = host }
@@ -332,11 +379,11 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	room := getRoom(roomID)
 	room.mu.Lock()
-	if _, exists := room.peers[id]; exists {
+	existing := room.peers[id]
+	if existing != nil {
 		room.mu.Unlock()
-		_ = pc.Close()
-		_ = conn.WriteJSON(Signal{Type: "error", Data: mustJSON(map[string]string{"code": "DUPLICATE_PEER_ID"})})
-		return
+		replacePeerSession(existing, room)
+		room.mu.Lock()
 	}
 	if len(room.peers) >= maxRoomPeers() {
 		room.mu.Unlock()
