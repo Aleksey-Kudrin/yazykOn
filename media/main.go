@@ -137,6 +137,40 @@ func clusterOwnerKey(roomID string) string {
 func clusterRoomStateKey(roomID string) string {
 	return "yazykon:sfu:state:" + roomID
 }
+func clusterRoomTracksKey(roomID string) string {
+	return "yazykon:sfu:tracks:" + roomID
+}
+
+type clusterTrackState struct {
+	PeerID string `json:"peerId"`
+	TrackID string `json:"trackId"`
+	Kind string `json:"kind"`
+	UpdatedAt int64 `json:"updatedAt"`
+}
+
+func clusterSaveTrackState(roomID, peerID, trackID, kind string) {
+	clusterMu.RLock(); client := clusterRedis; clusterMu.RUnlock()
+	if client == nil || !clusterReady.Load() { return }
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second); defer cancel()
+	state := clusterTrackState{PeerID: peerID, TrackID: trackID, Kind: kind, UpdatedAt: time.Now().Unix()}
+	key := clusterRoomTracksKey(roomID)
+	_ = client.HSet(ctx, key, peerID+":"+trackID, mustJSON(state)).Err()
+	_ = client.Expire(ctx, key, 90*time.Second).Err()
+}
+
+func clusterRemoveTrackState(roomID, peerID, trackID string) {
+	clusterMu.RLock(); client := clusterRedis; clusterMu.RUnlock()
+	if client == nil || !clusterReady.Load() { return }
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second); defer cancel()
+	_ = client.HDel(ctx, clusterRoomTracksKey(roomID), peerID+":"+trackID).Err()
+}
+
+func clusterDeleteTrackState(roomID string) {
+	clusterMu.RLock(); client := clusterRedis; clusterMu.RUnlock()
+	if client == nil || !clusterReady.Load() { return }
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second); defer cancel()
+	_ = client.Del(ctx, clusterRoomTracksKey(roomID)).Err()
+}
 
 type clusterRoomState struct {
 	RoomID string `json:"roomId"`
@@ -791,6 +825,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		room.mu.Lock()
 		room.tracks[publishedID] = &PublishedTrack{ownerID: id, trackID: track.ID(), local: local}
 		room.mu.Unlock()
+		clusterSaveTrackState(room.id, id, track.ID(), strings.ToLower(strings.Split(codec.MimeType, "/")[0]))
 
 		for _, target := range othersSnapshot(room, id) {
 			if sender, err := target.pc.AddTrack(local); err == nil {
@@ -1152,6 +1187,7 @@ func removePeer(p *Peer) {
 	if empty {
 		clusterReleaseRoom(p.room.id)
 		clusterDeleteRoomState(p.room.id)
+		clusterDeleteTrackState(p.room.id)
 		roomsMu.Lock()
 		delete(rooms, p.room.id)
 		roomsMu.Unlock()
@@ -1184,6 +1220,7 @@ func removePublication(room *Room, publishedID string) {
 	}
 	delete(room.tracks, publishedID)
 	remaining := make([]*Peer, 0, len(room.peers))
+	clusterRemoveTrackState(room.id, published.ownerID, published.trackID)
 	for _, p := range room.peers {
 		remaining = append(remaining, p)
 	}
