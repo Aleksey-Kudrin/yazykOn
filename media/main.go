@@ -25,6 +25,7 @@ import (
 	"github.com/pion/ice/v4"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
+	"github.com/redis/go-redis/v9"
 )
 
 const (
@@ -62,6 +63,7 @@ type ModerationCommand struct {
 
 type Peer struct {
 	id        string
+	sessionID string
 	userID    string
 	role      string
 	room      *Room
@@ -95,6 +97,10 @@ type PublishedTrack struct {
 }
 
 var (
+	clusterMu sync.RWMutex
+	clusterRedis *redis.Client
+	clusterNodeID string
+	clusterReady atomic.Bool
 	mediaConnMu sync.Mutex
 	mediaConnByIP = map[string]int{}
 	activePeers atomic.Int64
@@ -110,6 +116,195 @@ var (
 	roomsMu  sync.Mutex
 	rooms    = map[string]*Room{}
 )
+
+
+func clusterPeerKey(roomID, peerID, sessionID string) string {
+	return "yazykon:sfu:peer:" + roomID + ":" + peerID + ":" + sessionID
+}
+
+func clusterNodeKey(nodeID string) string {
+	return "yazykon:sfu:node:" + nodeID
+}
+
+func clusterChannel(roomID string) string {
+	return "yazykon:sfu:room:" + roomID
+}
+
+func clusterInit() func() {
+	url := strings.TrimSpace(os.Getenv("REDIS_URL"))
+	if url == "" {
+		return func() {}
+	}
+	opts, err := redis.ParseURL(url)
+	if err != nil {
+		log.Printf("SFU Redis disabled: invalid REDIS_URL: %v", err)
+		return func() {}
+	}
+	client := redis.NewClient(opts)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	if err := client.Ping(ctx).Err(); err != nil {
+		cancel()
+		_ = client.Close()
+		log.Printf("SFU Redis disabled: ping failed: %v", err)
+		return func() {}
+	}
+	cancel()
+	nodeID := strings.TrimSpace(os.Getenv("INSTANCE_ID"))
+	if nodeID == "" {
+		host, _ := os.Hostname()
+		nodeID = host
+	}
+	if nodeID == "" {
+		nodeID = "sfu-" + newID()
+	}
+	clusterMu.Lock()
+	clusterRedis = client
+	clusterNodeID = nodeID
+	clusterMu.Unlock()
+	clusterReady.Store(true)
+
+	go func() {
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			clusterSync()
+		}
+	}()
+	clusterSync()
+	log.Printf("SFU shared control plane enabled: node=%s", nodeID)
+
+	return func() {
+		clusterReady.Store(false)
+		clusterMu.Lock()
+		client := clusterRedis
+		clusterRedis = nil
+		clusterMu.Unlock()
+		if client != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			_ = client.Del(ctx, clusterNodeKey(nodeID)).Err()
+			cancel()
+			_ = client.Close()
+		}
+	}
+}
+
+func clusterSync() {
+	clusterMu.RLock()
+	client := clusterRedis
+	nodeID := clusterNodeID
+	clusterMu.RUnlock()
+	if client == nil || !clusterReady.Load() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	nodePayload := mustJSON(map[string]any{
+		"nodeId": nodeID,
+		"activePeers": activePeers.Load(),
+		"activeRooms": activeRooms.Load(),
+		"timestamp": time.Now().Unix(),
+	})
+	if err := client.Set(ctx, clusterNodeKey(nodeID), nodePayload, 25*time.Second).Err(); err != nil {
+		log.Printf("SFU Redis node heartbeat failed: %v", err)
+		return
+	}
+
+	roomsMu.Lock()
+	roomSnapshot := make([]*Room, 0, len(rooms))
+	for _, room := range rooms {
+		roomSnapshot = append(roomSnapshot, room)
+	}
+	roomsMu.Unlock()
+
+	for _, room := range roomSnapshot {
+		room.mu.RLock()
+		peers := make([]*Peer, 0, len(room.peers))
+		for _, peer := range room.peers {
+			peers = append(peers, peer)
+		}
+		room.mu.RUnlock()
+		for _, peer := range peers {
+			peer.mu.Lock()
+			closed := peer.closed
+			sessionID := peer.sessionID
+			userID := peer.userID
+			role := peer.role
+			peer.mu.Unlock()
+			if closed {
+				continue
+			}
+			payload := mustJSON(map[string]any{
+				"nodeId": nodeID,
+				"roomId": room.id,
+				"peerId": peer.id,
+				"sessionId": sessionID,
+				"userId": userID,
+				"role": role,
+				"updatedAt": time.Now().Unix(),
+			})
+			_ = client.Set(ctx, clusterPeerKey(room.id, peer.id, sessionID), payload, 75*time.Second).Err()
+		}
+	}
+}
+
+func clusterRegisterPeer(peer *Peer) {
+	clusterMu.RLock()
+	client := clusterRedis
+	nodeID := clusterNodeID
+	clusterMu.RUnlock()
+	if client == nil || !clusterReady.Load() {
+		return
+	}
+	payload := mustJSON(map[string]any{
+		"nodeId": nodeID,
+		"roomId": peer.room.id,
+		"peerId": peer.id,
+		"sessionId": peer.sessionID,
+		"userId": peer.userID,
+		"role": peer.role,
+		"updatedAt": time.Now().Unix(),
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := client.Set(ctx, clusterPeerKey(peer.room.id, peer.id, peer.sessionID), payload, 75*time.Second).Err(); err != nil {
+		log.Printf("SFU Redis peer register failed: %v", err)
+	}
+}
+
+func clusterRemovePeer(peer *Peer) {
+	clusterMu.RLock()
+	client := clusterRedis
+	clusterMu.RUnlock()
+	if client == nil || !clusterReady.Load() || peer.room == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = client.Del(ctx, clusterPeerKey(peer.room.id, peer.id, peer.sessionID)).Err()
+}
+
+func clusterPublish(roomID, eventType, peerID, sessionID string) {
+	clusterMu.RLock()
+	client := clusterRedis
+	nodeID := clusterNodeID
+	clusterMu.RUnlock()
+	if client == nil || !clusterReady.Load() {
+		return
+	}
+	payload := mustJSON(map[string]any{
+		"nodeId": nodeID,
+		"type": eventType,
+		"roomId": roomID,
+		"peerId": peerID,
+		"sessionId": sessionID,
+		"timestamp": time.Now().Unix(),
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := client.Publish(ctx, clusterChannel(roomID), payload).Err(); err != nil {
+		log.Printf("SFU Redis event publish failed: %v", err)
+	}
+}
 
 func newPeerConnection() (*webrtc.PeerConnection, error) {
 	settings := webrtc.SettingEngine{}
@@ -183,9 +378,15 @@ func send(p *Peer, msg Signal) error {
 }
 
 func main() {
+  clusterShutdown := clusterInit()
+  defer clusterShutdown()
   http.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"ok":true,"service":"yazykOn-sfu","version":"0.5.0","mediaUdpRange":"50000-50100"}`))
+		clusterMu.RLock()
+		nodeID := clusterNodeID
+		clusterMu.RUnlock()
+		payload := map[string]any{"ok": true, "service": "yazykOn-sfu", "version": "0.6.0", "mediaUdpRange": "50000-50100", "nodeId": nodeID, "cluster": clusterReady.Load()}
+		_ = json.NewEncoder(w).Encode(payload)
 	})
 	http.HandleFunc("/ws", handleWS)
 	http.HandleFunc("/control/role", handleRoleControl)
@@ -405,7 +606,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	room.mu.Unlock()
-	me := &Peer{id: id, userID: claims.UserID, role: claims.Role, room: room, conn: conn, pc: pc, published: make(map[string]*webrtc.TrackLocalStaticRTP), subscriptions: make(map[string]*webrtc.RTPSender)}
+	me := &Peer{id: id, sessionID: newID(), userID: claims.UserID, role: claims.Role, room: room, conn: conn, pc: pc, published: make(map[string]*webrtc.TrackLocalStaticRTP), subscriptions: make(map[string]*webrtc.RTPSender)}
 
 	room.mu.Lock()
 	me.waiting = room.lobby && claims.Role != "host" && claims.Role != "cohost"
@@ -423,6 +624,8 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		tracks = append(tracks, t)
 	}
 	room.mu.Unlock()
+	clusterRegisterPeer(me)
+	clusterPublish(room.id, "peer-joined", me.id, me.sessionID)
 
 	pc.OnICECandidate(func(c *webrtc.ICECandidate) {
 		if c == nil {
@@ -756,6 +959,8 @@ func removePeer(p *Peer) {
 	if p.room == nil {
 		return
 	}
+	clusterRemovePeer(p)
+	clusterPublish(p.room.id, "peer-left", p.id, p.sessionID)
 	p.room.mu.Lock()
 	delete(p.room.peers, p.id)
 	activePeers.Add(-1)
