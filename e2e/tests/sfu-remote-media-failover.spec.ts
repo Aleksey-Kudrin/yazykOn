@@ -11,7 +11,7 @@ const composeFile = process.env.SFU_FAILOVER_COMPOSE ?? "e2e/docker-compose.sfu-
 
 function token(userId: string) {
   const payload = Buffer.from(JSON.stringify({
-    roomId, userId, role: userId === "p1" ? "host" : "participant",
+    roomId, userId, role: userId === "p1" ? "host" : "member",
     exp: Math.floor(Date.now() / 1000) + 300
   })).toString("base64url");
   return payload + "." + createHmac("sha256", secret).update(payload).digest("base64url");
