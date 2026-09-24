@@ -259,19 +259,55 @@ test("multiple active rooms transfer ownership and reconnect on secondary", asyn
       ownersBefore: before.map(item => item.value),
       ownersAfter: after,
       reconnectResults,
-      media: { initial: initialMedia, recovered: recoveredMedia },
+      reverseResults,
+      media: { initial: initialMedia, recovered: recoveredMedia, reverse: reverseMedia },
+      reverseFailoverMs: reverseMs,
       deltas,
       budgets: { maxActivePeerDelta, maxRoomDelta, maxTrackDelta },
       resourceChecks,
       pass: reconnectResults.every((item, i) => item.peerId === joined[i].peerId)
         && redisAfter.every(item => item.owner === 1 && item.state === 1)
+        && reverseResults.every((item, i) => item.peerId === joined[i].peerId)
+        && reverseRedis.every(item => item.owner === 1 && item.state === 1)
         && Object.values(resourceChecks).every(Boolean)
     };
     fs.mkdirSync(artifactDir, { recursive: true });
     fs.writeFileSync(path.join(artifactDir, "sfu-multi-room-failover-report.json"), JSON.stringify(report, null, 2));
     expect(Object.values(resourceChecks).every(Boolean)).toBeTruthy();
+
+    // Reverse failover validates that the recovered media sessions are not
+    // permanently pinned to the secondary node.
+    execFileSync("docker", ["compose", "-f", composeFile, "start", "sfu-primary"], { stdio: "inherit" });
+    await waitHealth(primary);
+    execFileSync("docker", ["compose", "-f", composeFile, "stop", "sfu-secondary"], { stdio: "inherit" });
+    await new Promise(resolve => setTimeout(resolve, ttlMs + 1500));
+
+    const reverseOwners = await redisOwners(roomIds);
+    for (const owner of reverseOwners) {
+      expect(owner.value?.nodeId).toBe("integration-primary");
+      expect(owner.value?.endpoint).toContain("4100");
+    }
+
+    const reverseStarted = Date.now();
+    const reverseResults = await Promise.all(reconnectResults.map((item, i) =>
+      joinRoom(pages[i], primary, item.roomId, item.peerId)
+    ));
+    const reverseMedia = await Promise.all(roomIds.map((roomId, i) => mediaState(pages[i], roomId)));
+    const reverseMs = Date.now() - reverseStarted;
+
+    for (let i = 0; i < reverseMedia.length; i++) {
+      expect(reverseResults[i].peerId).toBe(joined[i].peerId);
+      expect(reverseMedia[i]?.peerId).toBe(joined[i].peerId);
+      expect(reverseMedia[i]?.trackIds).toEqual(initialMedia[i]?.trackIds);
+      expect(reverseMedia[i]?.trackStates.every((value: string) => value === "live")).toBeTruthy();
+    }
+
+    const reverseRedis = await redisRoomState(roomIds);
+    expect(reverseRedis.every(item => item.owner === 1 && item.state === 1)).toBeTruthy();
+
     for (let i = 0; i < roomIds.length; i++) {
       expect(recoveredMedia[i]?.trackIds).toEqual(initialMedia[i]?.trackIds);
+      expect(reverseMedia[i]?.trackIds).toEqual(initialMedia[i]?.trackIds);
     }
   } finally {
     execFileSync("docker", ["compose", "-f", composeFile, "start", "sfu-primary"], { stdio: "inherit" });
