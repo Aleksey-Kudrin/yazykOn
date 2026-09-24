@@ -34,7 +34,8 @@ type Peer struct {
 	closed    bool
 	negotiating bool
 	negotiationPending bool
-	published map[string]*webrtc.TrackLocalStaticRTP
+	published      map[string]*webrtc.TrackLocalStaticRTP
+	subscriptions  map[string]*webrtc.RTPSender
 }
 
 type Room struct {
@@ -121,7 +122,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	room := getRoom(first.RoomID)
-	me := &Peer{id: id, room: room, conn: conn, pc: pc, published: make(map[string]*webrtc.TrackLocalStaticRTP)}
+	me := &Peer{id: id, room: room, conn: conn, pc: pc, published: make(map[string]*webrtc.TrackLocalStaticRTP), subscriptions: make(map[string]*webrtc.RTPSender)}
 
 	room.mu.Lock()
 	room.peers[id] = me
@@ -161,7 +162,12 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		room.mu.Unlock()
 
 		for _, target := range othersSnapshot(room, id) {
-			if _, err := target.pc.AddTrack(local); err == nil {
+			if sender, err := target.pc.AddTrack(local); err == nil {
+				target.mu.Lock()
+				if !target.closed {
+					target.subscriptions[publishedID] = sender
+				}
+				target.mu.Unlock()
 				renegotiate(target)
 			}
 		}
@@ -178,17 +184,19 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		room.mu.Lock()
-		delete(room.tracks, publishedID)
-		room.mu.Unlock()
+		removePublication(room, publishedID)
 	})
 
 	for _, t := range tracks {
 		if t.ownerID == id {
 			continue
 		}
-		if _, err := pc.AddTrack(t.local); err != nil {
+		if sender, err := pc.AddTrack(t.local); err != nil {
 			log.Printf("initial track %s: %v", t.trackID, err)
+		} else {
+			me.mu.Lock()
+			me.subscriptions[t.ownerID+":"+t.trackID] = sender
+			me.mu.Unlock()
 		}
 	}
 
@@ -320,8 +328,10 @@ func removePeer(p *Peer) {
 	}
 	p.room.mu.Lock()
 	delete(p.room.peers, p.id)
+	removedTracks := make([]string, 0)
 	for id, t := range p.room.tracks {
 		if t.ownerID == p.id {
+			removedTracks = append(removedTracks, id)
 			delete(p.room.tracks, id)
 		}
 	}
@@ -331,7 +341,13 @@ func removePeer(p *Peer) {
 	}
 	empty := len(p.room.peers) == 0
 	p.room.mu.Unlock()
+
 	for _, other := range remaining {
+		for _, publishedID := range removedTracks {
+			if removeSubscription(other, publishedID) {
+				renegotiate(other)
+			}
+		}
 		_ = send(other, Signal{Type: "peer-left", PeerID: p.id})
 	}
 	_ = p.pc.Close()
@@ -340,6 +356,44 @@ func removePeer(p *Peer) {
 		delete(rooms, p.room.id)
 		roomsMu.Unlock()
 	}
+}
+
+func removePublication(room *Room, publishedID string) {
+	room.mu.Lock()
+	if _, ok := room.tracks[publishedID]; !ok {
+		room.mu.Unlock()
+		return
+	}
+	delete(room.tracks, publishedID)
+	remaining := make([]*Peer, 0, len(room.peers))
+	for _, p := range room.peers {
+		remaining = append(remaining, p)
+	}
+	room.mu.Unlock()
+
+	for _, target := range remaining {
+		if removeSubscription(target, publishedID) {
+			renegotiate(target)
+		}
+	}
+}
+
+func removeSubscription(p *Peer, publishedID string) bool {
+	p.mu.Lock()
+	sender, ok := p.subscriptions[publishedID]
+	if ok {
+		delete(p.subscriptions, publishedID)
+	}
+	closed := p.closed
+	p.mu.Unlock()
+	if !ok || closed {
+		return false
+	}
+	if err := p.pc.RemoveTrack(sender); err != nil {
+		log.Printf("remove track %s from peer %s: %v", publishedID, p.id, err)
+		return false
+	}
+	return true
 }
 
 func peerIDs(peers []*Peer) []string {
