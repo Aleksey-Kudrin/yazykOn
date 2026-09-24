@@ -83,36 +83,106 @@ async function redisRoomState(roomIds: string[]) {
 
 async function joinRoom(page: import("@playwright/test").Page, endpoint: string, roomId: string, peerId?: string) {
   return page.evaluate(async ({ endpoint, roomId, accessToken, peerId }) => {
+    const store = (globalThis as any).__multiRoomMedia ??= new Map();
+    const stream = store.get(roomId)?.stream as MediaStream | undefined
+      ?? await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    const previous = store.get(roomId);
+    previous?.ws?.close();
+    previous?.pc?.close();
+
+    const pc = new RTCPeerConnection();
+    for (const track of stream.getTracks()) pc.addTrack(track, stream);
+
     const ws = new WebSocket(endpoint.replace(/^http/, "ws") + "/ws");
-    const messages: any[] = [];
-    let waiter: ((message: any) => void) | undefined;
+    const queue: any[] = [];
+    const waiters = new Map<string, Array<(message: any) => void>>();
+
+    const waitFor = (type: string) => new Promise<any>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("timeout: " + type)), 15000);
+      const queued = queue.findIndex(message => message.type === type);
+      if (queued >= 0) {
+        clearTimeout(timer);
+        resolve(queue.splice(queued, 1)[0]);
+        return;
+      }
+      const list = waiters.get(type) ?? [];
+      list.push(message => { clearTimeout(timer); resolve(message); });
+      waiters.set(type, list);
+    });
+
     ws.onmessage = event => {
       const message = JSON.parse(event.data);
-      if (waiter) { const resolve = waiter; waiter = undefined; resolve(message); }
-      else messages.push(message);
+      if (message.type === "ice" && message.data) void pc.addIceCandidate(message.data);
+      const list = waiters.get(message.type);
+      if (list?.length) {
+        list.shift()!(message);
+        if (!list.length) waiters.delete(message.type);
+      } else queue.push(message);
     };
-    const next = (type: string) => new Promise<any>((resolve, reject) => {
-      const queued = messages.findIndex(message => message.type === type);
-      if (queued >= 0) return resolve(messages.splice(queued, 1)[0]);
-      const timer = setTimeout(() => reject(new Error("timeout: " + type)), 10000);
-      waiter = message => {
-        if (message.type === type) { clearTimeout(timer); resolve(message); }
-        else waiter = message;
-      };
-    });
+
+    pc.onicecandidate = event => {
+      if (event.candidate && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "ice", roomId, data: event.candidate.toJSON() }));
+      }
+    };
+
     await new Promise<void>((resolve, reject) => {
       ws.onopen = () => resolve();
-      ws.onerror = () => reject(new Error("websocket failed"));
+      ws.onerror = () => reject(new Error("websocket failed: " + endpoint));
     });
+
     ws.send(JSON.stringify({
       type: "join", roomId,
       data: { accessToken, reconnect: Boolean(peerId), ...(peerId ? { peerId } : {}) }
     }));
-    const joined = await next("joined");
-    ws.close();
-    return { peerId: joined.peerId, roomId };
+    const joined = await waitFor("joined");
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    ws.send(JSON.stringify({ type: "offer", roomId, data: pc.localDescription }));
+    const answer = await waitFor("answer");
+    if (answer.data) await pc.setRemoteDescription(answer.data);
+
+    store.set(roomId, { pc, ws, stream, peerId: joined.peerId });
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    return {
+      peerId: joined.peerId,
+      roomId,
+      trackIds: stream.getTracks().map(track => track.id),
+      trackStates: stream.getTracks().map(track => track.readyState),
+      connectionState: pc.connectionState,
+      iceConnectionState: pc.iceConnectionState
+    };
   }, { endpoint, roomId, peerId, accessToken: token(roomId, "owner-" + roomId) });
 }
+
+async function closeRoomMedia(page: import("@playwright/test").Page, roomId: string, stopTracks = false) {
+  await page.evaluate(({ roomId, stopTracks }) => {
+    const store = (globalThis as any).__multiRoomMedia;
+    const connection = store?.get(roomId);
+    if (!connection) return;
+    connection.ws?.close();
+    connection.pc?.close();
+    if (stopTracks) connection.stream?.getTracks().forEach((track: MediaStreamTrack) => track.stop());
+    store.delete(roomId);
+  }, { roomId, stopTracks });
+}
+
+async function mediaState(page: import("@playwright/test").Page, roomId: string) {
+  return page.evaluate((roomId) => {
+    const connection = (globalThis as any).__multiRoomMedia?.get(roomId);
+    if (!connection) return null;
+    return {
+      peerId: connection.peerId,
+      trackIds: connection.stream.getTracks().map((track: MediaStreamTrack) => track.id),
+      trackStates: connection.stream.getTracks().map((track: MediaStreamTrack) => track.readyState),
+      connectionState: connection.pc.connectionState,
+      iceConnectionState: connection.pc.iceConnectionState
+    };
+  }, roomId);
+}
+
 
 test("multiple active rooms transfer ownership and reconnect on secondary", async ({ browser }) => {
   test.skip(!process.env.SFU_FAILOVER_LIVE, "Set SFU_FAILOVER_LIVE=1 for the live Docker run");
@@ -125,6 +195,11 @@ test("multiple active rooms transfer ownership and reconnect on secondary", asyn
   );
   const roomIds = Array.from({ length: rooms }, (_, i) => "FAILOVER-ROOM-" + (i + 1));
   const joined = await Promise.all(roomIds.map((roomId, i) => joinRoom(pages[i], primary, roomId)));
+  const initialMedia = await Promise.all(roomIds.map((roomId, i) => mediaState(pages[i], roomId)));
+  for (const state of initialMedia) {
+    expect(state?.trackIds.length).toBeGreaterThan(0);
+    expect(state?.trackStates.every((value: string) => value === "live")).toBeTruthy();
+  }
   const metricsBefore = await runtimeMetrics(primary);
   expect(new Set(joined.map(item => item.peerId)).size).toBe(rooms);
 
@@ -146,6 +221,12 @@ test("multiple active rooms transfer ownership and reconnect on secondary", asyn
     const reconnectResults = await Promise.all(joined.map((item, i) =>
       joinRoom(pages[i], secondary, item.roomId, item.peerId)
     ));
+    const recoveredMedia = await Promise.all(roomIds.map((roomId, i) => mediaState(pages[i], roomId)));
+    for (let i = 0; i < recoveredMedia.length; i++) {
+      expect(recoveredMedia[i]?.peerId).toBe(joined[i].peerId);
+      expect(recoveredMedia[i]?.trackIds).toEqual(initialMedia[i]?.trackIds);
+      expect(recoveredMedia[i]?.trackStates.every((value: string) => value === "live")).toBeTruthy();
+    }
     const reconnectMs = Date.now() - reconnectStarted;
     const metricsAfter = await runtimeMetrics(secondary);
     const redisAfter = await redisRoomState(roomIds);
@@ -178,6 +259,7 @@ test("multiple active rooms transfer ownership and reconnect on secondary", asyn
       ownersBefore: before.map(item => item.value),
       ownersAfter: after,
       reconnectResults,
+      media: { initial: initialMedia, recovered: recoveredMedia },
       deltas,
       budgets: { maxActivePeerDelta, maxRoomDelta, maxTrackDelta },
       resourceChecks,
@@ -188,9 +270,13 @@ test("multiple active rooms transfer ownership and reconnect on secondary", asyn
     fs.mkdirSync(artifactDir, { recursive: true });
     fs.writeFileSync(path.join(artifactDir, "sfu-multi-room-failover-report.json"), JSON.stringify(report, null, 2));
     expect(Object.values(resourceChecks).every(Boolean)).toBeTruthy();
+    for (let i = 0; i < roomIds.length; i++) {
+      expect(recoveredMedia[i]?.trackIds).toEqual(initialMedia[i]?.trackIds);
+    }
   } finally {
     execFileSync("docker", ["compose", "-f", composeFile, "start", "sfu-primary"], { stdio: "inherit" });
     await waitHealth(primary);
+    await Promise.all(pages.map((page, i) => closeRoomMedia(page, roomIds[i], true).catch(() => {})));
     await Promise.all(pages.map(page => page.close()));
   }
 });
