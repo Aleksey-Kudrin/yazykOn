@@ -42,6 +42,7 @@ export function Room({ roomId }: RoomProps) {
   const reconnectTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttempt = React.useRef(0);
   const reconnecting = React.useRef(false);
+  const selfIdRef = React.useRef("");
   const connectionGeneration = React.useRef(0);
   const [chat, setChat] = React.useState<ChatMessage[]>([]);
   const [chatText, setChatText] = React.useState("");
@@ -211,6 +212,7 @@ export function Room({ roomId }: RoomProps) {
           if (stopped || generation !== connectionGeneration.current) { ws.close(); return; }
           reconnectAttempt.current = 0;
           reconnecting.current = false;
+          setStatus("Восстанавливаем медиасессию…");
           setStatus("Подключено к языкOn SFU");
-          ws.send(JSON.stringify({ type: "join", roomId: sfuRoomId, data: { accessToken } }));
+          ws.send(JSON.stringify({ type: "join", roomId: sfuRoomId, peerId: selfIdRef.current || undefined, data: { accessToken, reconnect: Boolean(selfIdRef.current) } }));
           for (const candidate of pendingLocalIce.current) {
