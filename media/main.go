@@ -453,6 +453,11 @@ func removePeer(p *Peer) {
 	for _, other := range p.room.peers {
 		remaining = append(remaining, other)
 	}
+	newHost := ""
+	if p.room.hostID == p.id && len(remaining) > 0 {
+		newHost = remaining[0].id
+		p.room.hostID = newHost
+	}
 	empty := len(p.room.peers) == 0
 	p.room.mu.Unlock()
 
@@ -463,6 +468,9 @@ func removePeer(p *Peer) {
 			}
 		}
 		_ = send(other, Signal{Type: "peer-left", PeerID: p.id})
+		if newHost != "" {
+			_ = send(other, Signal{Type: "host-changed", PeerID: newHost})
+		}
 	}
 	_ = p.pc.Close()
 	if empty {
