@@ -69,6 +69,7 @@ jobs:
         env:
           SFU_FAILOVER_LIVE: "1"
           SFU_CHURN_ROUNDS: "12"
+          SFU_ARTIFACT_DIR: artifacts
           ROOM_ACCESS_SECRET: integration-secret
           REDIS_URL: redis://127.0.0.1:6379
           SFU_PRIMARY_URL: http://127.0.0.1:4100
