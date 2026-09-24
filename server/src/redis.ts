@@ -102,8 +102,8 @@ export async function redisRefreshPeer(roomId: string, peerId: string, nodeId: s
   const raw = await redis.get(key);
   if (!raw) return false;
   try {
-    const value = JSON.parse(raw) as { nodeId?: string };
-    if (value.nodeId !== nodeId) return false;
+    const value = JSON.parse(raw) as { nodeId?: string; sessionId?: string };
+    if (value.nodeId !== nodeId || value.sessionId !== sessionId) return false;
   } catch {
     return false;
   }
