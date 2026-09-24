@@ -65,14 +65,37 @@ export async function redisListPresence(roomId: string) {
   return users;
 }
 
-export async function redisRegisterPeer(roomId: string, peerId: string, nodeId: string, ttlSeconds = 60) {
-  const redis = await getRedis();
-  if (!redis) return false;
-  await redis.set(peerKey(roomId, peerId), JSON.stringify({ nodeId, peerId }), { EX: ttlSeconds });
-  return true;
+export interface RedisPeerRecord {
+  nodeId: string;
+  peerId: string;
+  sessionId: string;
 }
 
-export async function redisRefreshPeer(roomId: string, peerId: string, nodeId: string, ttlSeconds = 60) {
+export async function redisRegisterPeer(
+  roomId: string,
+  peerId: string,
+  nodeId: string,
+  sessionId: string,
+  ttlSeconds = 60
+): Promise<RedisPeerRecord | null> {
+  const redis = await getRedis();
+  if (!redis) return null;
+  const key = peerKey(roomId, peerId);
+  const previousRaw = await redis.get(key);
+  let previous: RedisPeerRecord | null = null;
+  if (previousRaw) {
+    try {
+      const value = JSON.parse(previousRaw) as Partial<RedisPeerRecord>;
+      if (value.nodeId && value.peerId && value.sessionId) {
+        previous = { nodeId: value.nodeId, peerId: value.peerId, sessionId: value.sessionId };
+      }
+    } catch { /* replace malformed registry entries */ }
+  }
+  await redis.set(key, JSON.stringify({ nodeId, peerId, sessionId }), { EX: ttlSeconds });
+  return previous;
+}
+
+export async function redisRefreshPeer(roomId: string, peerId: string, nodeId: string, sessionId: string, ttlSeconds = 60) {
   const redis = await getRedis();
   if (!redis) return false;
   const key = peerKey(roomId, peerId);
@@ -88,7 +111,7 @@ export async function redisRefreshPeer(roomId: string, peerId: string, nodeId: s
   return true;
 }
 
-export async function redisRemovePeer(roomId: string, peerId: string, nodeId: string) {
+export async function redisRemovePeer(roomId: string, peerId: string, nodeId: string, sessionId: string) {
   const redis = await getRedis();
   if (!redis) return false;
   const key = peerKey(roomId, peerId);
@@ -108,13 +131,15 @@ export async function redisListPeers(roomId: string) {
   const redis = await getRedis();
   if (!redis) return [];
   const prefix = `yazykon:peer:${roomId}:`;
-  const peers: Array<{ peerId: string; nodeId: string }> = [];
+  const peers: RedisPeerRecord[] = [];
   for await (const key of redis.scanIterator({ MATCH: `${prefix}*`, COUNT: 100 })) {
     const raw = await redis.get(key);
     if (!raw) continue;
     try {
-      const value = JSON.parse(raw) as { peerId?: string; nodeId?: string };
-      if (value.peerId && value.nodeId) peers.push({ peerId: value.peerId, nodeId: value.nodeId });
+      const value = JSON.parse(raw) as Partial<RedisPeerRecord>;
+      if (value.peerId && value.nodeId && value.sessionId) {
+        peers.push({ peerId: value.peerId, nodeId: value.nodeId, sessionId: value.sessionId });
+      }
     } catch { /* ignore malformed registry entries */ }
   }
   return peers;
