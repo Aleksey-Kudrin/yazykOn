@@ -1,4 +1,5 @@
 import React from "react";
+import { accessRoom, getRoom } from "./api";
 
 interface RoomProps { roomId: string; }
 type SignalMessage =
@@ -42,7 +43,7 @@ export function Room({ roomId }: RoomProps) {
   const remoteOwners = React.useRef(new Map<string, string>());
   const remoteTrackStreams = React.useRef(new Map<string, string>());
   const [remotes, setRemotes] = React.useState<Array<{ id: string; stream: MediaStream }>>([]);
-  const [status, setStatus] = React.useState("Запуск камеры…");
+  const [status, setStatus] = React.useState("Проверяем доступ к комнате…");
   const [connected, setConnected] = React.useState(false);
   const [mic, setMic] = React.useState(true);
   const [camera, setCamera] = React.useState(true);
@@ -62,6 +63,18 @@ export function Room({ roomId }: RoomProps) {
     let stopped = false;
     async function start() {
       try {
+        const room = await getRoom(roomId);
+        let accessToken = sessionStorage.getItem("yazykon-access-" + roomId);
+        if (room.requiresPassword && !accessToken) {
+          const password = window.prompt("Введите пароль комнаты");
+          if (password === null) { setStatus("Вход отменён"); return; }
+          const access = await accessRoom(roomId, password);
+          accessToken = access.accessToken;
+        } else if (!room.requiresPassword && !accessToken) {
+          const access = await accessRoom(roomId);
+          accessToken = access.accessToken;
+        }
+        if (accessToken) sessionStorage.setItem("yazykon-access-" + roomId, accessToken);
         const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         if (stopped) { stream.getTracks().forEach(t => t.stop()); return; }
         localStream.current = stream;
@@ -115,7 +128,7 @@ export function Room({ roomId }: RoomProps) {
         socket.current = ws;
         ws.onopen = async () => {
           setStatus("Подключено к языкOn SFU");
-          ws.send(JSON.stringify({ type: "join", roomId }));
+          ws.send(JSON.stringify({ type: "join", roomId, data: { accessToken } }));
           for (const candidate of pendingLocalIce.current) {
             ws.send(JSON.stringify({ type: "ice", roomId, data: candidate }));
           }
