@@ -1,6 +1,6 @@
 import React from "react";
 import { MeetingFeatureControls } from "./MeetingFeatures";
-import { accessRoom, getRoom, getRoomMembers, getRoomMessages, sendRoomMessage, setRoomMemberRole, getBreakoutRooms, createBreakoutRoom, assignBreakoutParticipant, joinBreakoutRoom, type BreakoutRoom, type RoomMember } from "./api";
+import { accessRoom, getRoom, getRoomMembers, getRoomMessages, sendRoomMessage, setRoomMemberRole, getBreakoutRooms, createBreakoutRoom, assignBreakoutParticipant, removeBreakoutParticipant, deleteBreakoutRoom, joinBreakoutRoom, type BreakoutRoom, type RoomMember } from "./api";
 
 interface RoomProps { roomId: string; }
 type Participant = { peerId: string; userId?: string; role?: string };
@@ -410,6 +410,23 @@ export function Room({ roomId }: RoomProps) {
     finally { setBreakoutBusy(false); }
   }
 
+  async function unassignParticipant(breakoutId: string, userId: string) {
+    if (breakoutBusy) return;
+    setBreakoutBusy(true);
+    try { await removeBreakoutParticipant(roomId, breakoutId, userId); await refreshBreakouts(); setStatus("Участник возвращён из breakout-назначения"); }
+    catch { setStatus("Не удалось снять назначение"); }
+    finally { setBreakoutBusy(false); }
+  }
+
+  async function deleteBreakout(breakoutId: string) {
+    if (breakoutBusy) return;
+    if (!window.confirm("Удалить breakout-комнату? Участники смогут вернуться в основную комнату.")) return;
+    setBreakoutBusy(true);
+    try { await deleteBreakoutRoom(roomId, breakoutId); await refreshBreakouts(); setStatus("Breakout-комната удалена"); }
+    catch { setStatus("Не удалось удалить breakout-комнату"); }
+    finally { setBreakoutBusy(false); }
+  }
+
   async function enterBreakout(breakoutId: string) {
     if (breakoutBusy) return;
     setBreakoutBusy(true);
@@ -507,13 +524,11 @@ export function Room({ roomId }: RoomProps) {
       {breakouts.length === 0 && <span className="chat-empty">Комнаты ещё не созданы</span>}
       {breakouts.map(breakout => <div key={breakout.id} className="participant">
         <span>{breakout.name} ({breakout.participants.length})</span>
-        <button type="button" onClick={() => void enterBreakout(breakout.id)} disabled={breakoutBusy}>Войти</button>
+        <button type="button" onClick={() => void enterBreakout(breakout.id)} disabled={breakoutBusy}>Войти</button><button type="button" onClick={() => void deleteBreakout(breakout.id)} disabled={breakoutBusy}>Удалить</button>
         {participants.filter(p => p.userId && p.peerId !== selfId).map(p => {
           const assigned = Boolean(p.userId && breakout.participants.includes(p.userId));
           const member = members.find(m => m.id === p.userId);
-          return <button key={p.peerId} type="button" onClick={() => p.userId && void assignParticipant(breakout.id, p.userId)} disabled={breakoutBusy || assigned || !p.userId} title={assigned ? "Уже назначен" : "Назначить"}>
-            {assigned ? "✓ " + (member?.username ?? p.peerId.slice(0, 8)) : "+ " + (member?.username ?? p.peerId.slice(0, 8))}
-          </button>;
+          return <span key={p.peerId}>{replacement}</span>;
         })}
       </div>)}
     </aside>}
