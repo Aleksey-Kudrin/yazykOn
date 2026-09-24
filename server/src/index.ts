@@ -162,26 +162,35 @@ app.get("/api", (_req, res) => {
 });
 
 app.post("/api/rooms", async (req, res) => {
-  const name =
-    typeof req.body?.name === "string" && req.body.name.trim()
-      ? req.body.name.trim().slice(0, 100)
-      : "Новая конференция";
-  const password = typeof req.body?.password === "string" ? req.body.password.trim() : "";
-  if (password && !roomAccessSecret) {
-    res.status(503).json({ error: "ROOM_ACCESS_NOT_CONFIGURED" });
-    return;
-  }
-  if (password && (password.length < 4 || password.length > 128)) {
-    res.status(400).json({ error: "INVALID_ROOM_PASSWORD" });
-    return;
-  }
+  if (!db) { res.status(503).json({ error: "DATABASE_NOT_CONFIGURED" }); return; }
+  if (!roomAccessSecret) { res.status(503).json({ error: "ROOM_ACCESS_NOT_CONFIGURED" }); return; }
   const user = await currentUser(req);
   if (!user) { res.status(401).json({ error: "AUTH_REQUIRED" }); return; }
-  const room = createRoom(name, password);
-  const accessToken = issueRoomAccessToken(room.id, user.id, "host");
-  res.status(201).json({ ...room, accessToken });
-});
+  const name = typeof req.body?.name === "string" && req.body.name.trim() ? req.body.name.trim().slice(0, 100) : "Новая конференция";
+  const password = typeof req.body?.password === "string" ? req.body.password.trim() : "";
+  if (password && (password.length < 4 || password.length > 128)) { res.status(400).json({ error: "INVALID_ROOM_PASSWORD" }); return; }
 
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const id = randomBytes(4).toString("base64url").slice(0, 6).toUpperCase();
+    const salt = password ? randomBytes(16).toString("hex") : null;
+    const hash = password && salt ? requireScrypt(password, salt) : null;
+    try {
+      const result = await db.query(
+        "INSERT INTO rooms(id,name,owner_id,password_hash,password_salt) VALUES($1,$2,$3,$4,$5) RETURNING id,name,password_hash,password_salt,created_at",
+        [id, name, user.id, hash, salt]
+      );
+      await db.query("INSERT INTO room_members(room_id,user_id,role) VALUES($1,$2,'host')", [id, user.id]);
+      const row = result.rows[0];
+      const room = { id: row.id, name: row.name, createdAt: new Date(row.created_at).toISOString(), requiresPassword: Boolean(row.password_hash && row.password_salt) };
+      res.status(201).json({ ...room, accessToken: issueRoomAccessToken(id, user.id, "host"), role: "host" });
+      return;
+    } catch (error) {
+      if (error?.code === "23505") continue;
+      res.status(500).json({ error: "ROOM_CREATE_FAILED" }); return;
+    }
+  }
+  res.status(500).json({ error: "ROOM_ID_GENERATION_FAILED" });
+});
 app.post("/api/rooms/:id/access", async (req, res) => {
   const room = getRoom(req.params.id);
   if (!room) { res.status(404).json({ error: "ROOM_NOT_FOUND" }); return; }
