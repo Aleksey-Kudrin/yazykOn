@@ -126,7 +126,8 @@ test("SFU chaos regression keeps recovery latency and active-state bounded", asy
     }
 
     initial.close();
-    await new Promise(resolve => setTimeout(resolve, 1000));\n    const after = await Promise.all([metrics(primary), metrics(secondary)]);
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    const after = await Promise.all([metrics(primary), metrics(secondary)]);
     const percentile = (values: number[], p: number) => {
       const sorted = [...values].sort((a, b) => a - b);
       return sorted[Math.min(sorted.length - 1, Math.ceil(values.length * p) - 1)];
