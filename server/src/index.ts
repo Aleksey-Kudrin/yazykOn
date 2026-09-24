@@ -222,12 +222,15 @@ app.post("/api/rooms", async (req, res) => {
     const id = randomBytes(4).toString("base64url").slice(0, 6).toUpperCase();
     const salt = password ? randomBytes(16).toString("hex") : null;
     const hash = password && salt ? requireScrypt(password, salt) : null;
+    const client = await db.connect();
     try {
-      const result = await db.query(
+      await client.query("BEGIN");
+      const result = await client.query(
         "INSERT INTO rooms(id,name,owner_id,password_hash,password_salt) VALUES($1,$2,$3,$4,$5) RETURNING id,name,password_hash,password_salt,created_at",
         [id, name, user.id, hash, salt]
       );
-      await db.query("INSERT INTO room_members(room_id,user_id,role) VALUES($1,$2,'host')", [id, user.id]);
+      await client.query("INSERT INTO room_members(room_id,user_id,role) VALUES($1,$2,'host')", [id, user.id]);
+      await client.query("COMMIT");
       const row = result.rows[0];
       const room = { id: row.id, name: row.name, createdAt: new Date(row.created_at).toISOString(), requiresPassword: Boolean(row.password_hash && row.password_salt) };
       res.status(201).json({ ...room, accessToken: issueRoomAccessToken(id, user.id, "host"), role: "host" });
