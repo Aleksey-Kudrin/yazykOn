@@ -61,6 +61,10 @@ app.post("/api/rooms", (req, res) => {
       ? req.body.name.trim().slice(0, 100)
       : "Новая конференция";
   const password = typeof req.body?.password === "string" ? req.body.password.trim() : "";
+  if (password && !roomAccessSecret) {
+    res.status(503).json({ error: "ROOM_ACCESS_NOT_CONFIGURED" });
+    return;
+  }
   if (password && (password.length < 4 || password.length > 128)) {
     res.status(400).json({ error: "INVALID_ROOM_PASSWORD" });
     return;
