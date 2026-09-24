@@ -466,7 +466,7 @@ func othersSnapshot(room *Room, self string) []*Peer {
 	defer room.mu.RUnlock()
 	out := make([]*Peer, 0, len(room.peers))
 	for id, p := range room.peers {
-		if id != self {
+		if id != self && !p.waiting {
 			out = append(out, p)
 		}
 	}
