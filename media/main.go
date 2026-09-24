@@ -91,9 +91,10 @@ type Room struct {
 }
 
 type PublishedTrack struct {
-	ownerID string
-	trackID string
-	local   *webrtc.TrackLocalStaticRTP
+	ownerID   string
+	trackID   string
+	sessionID string
+	local     *webrtc.TrackLocalStaticRTP
 }
 
 var (
@@ -142,13 +143,14 @@ func clusterRoomTracksKey(roomID string) string {
 }
 
 type clusterTrackState struct {
-	PeerID string `json:"peerId"`
-	TrackID string `json:"trackId"`
-	Kind string `json:"kind"`
+	PeerID    string `json:"peerId"`
+	TrackID   string `json:"trackId"`
+	SessionID string `json:"sessionId"`
+	Kind      string `json:"kind"`
 	UpdatedAt int64 `json:"updatedAt"`
 }
 
-func clusterSaveTrackState(roomID, peerID, trackID, kind string) {
+func clusterSaveTrackState(roomID, peerID, trackID, sessionID, kind string) {
 	clusterMu.RLock()
 	client := clusterRedis
 	clusterMu.RUnlock()
@@ -156,19 +158,24 @@ func clusterSaveTrackState(roomID, peerID, trackID, kind string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	key := clusterRoomTracksKey(roomID)
-	state := clusterTrackState{PeerID: peerID, TrackID: trackID, Kind: kind, UpdatedAt: time.Now().Unix()}
+	state := clusterTrackState{PeerID: peerID, TrackID: trackID, SessionID: sessionID, Kind: kind, UpdatedAt: time.Now().Unix()}
 	_ = client.HSet(ctx, key, peerID+":"+trackID, mustJSON(state)).Err()
 	_ = client.Expire(ctx, key, 90*time.Second).Err()
 }
 
-func clusterRemoveTrackState(roomID, peerID, trackID string) {
+func clusterRemoveTrackState(roomID, peerID, trackID, sessionID string) {
 	clusterMu.RLock()
 	client := clusterRedis
 	clusterMu.RUnlock()
 	if client == nil || !clusterReady.Load() { return }
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	_ = client.HDel(ctx, clusterRoomTracksKey(roomID), peerID+":"+trackID).Err()
+	const script = `local current = redis.call("HGET", KEYS[1], ARGV[1])
+if not current then return 0 end
+local ok, obj = pcall(cjson.decode, current)
+if not ok or obj.sessionId ~= ARGV[2] then return 0 end
+return redis.call("HDEL", KEYS[1], ARGV[1])`
+	_ = client.Eval(ctx, script, []string{clusterRoomTracksKey(roomID)}, peerID+":"+trackID, sessionID).Err()
 }
 
 func clusterDeleteTrackState(roomID string) {
@@ -262,7 +269,7 @@ func clusterClaimRoom(roomID string) (bool, string) {
 	defer cancel()
 	key := clusterOwnerKey(roomID)
 	payload := mustJSON(map[string]any{"nodeId": nodeID, "endpoint": clusterNodeEndpoint()})
-	claimed, err := client.SetNX(ctx, key, payload, 45*time.Second).Result()
+	claimed, err := client.SetNX(ctx, key, payload, sfuRoomOwnerTTL()).Result()
 	if err != nil {
 		log.Printf("SFU Redis room claim failed: %v", err)
 		return false, ""
@@ -302,7 +309,7 @@ func clusterRenewOwnedRooms() {
 		var owner struct { NodeID string `json:"nodeId"` }
 		if json.Unmarshal([]byte(current), &owner) != nil || owner.NodeID != nodeID { continue }
 		payload := mustJSON(map[string]any{"nodeId": nodeID, "endpoint": clusterNodeEndpoint()})
-		_ = client.Set(ctx, key, payload, 45*time.Second).Err()
+		_ = client.Set(ctx, key, payload, sfuRoomOwnerTTL()).Err()
 	}
 }
 
@@ -356,7 +363,7 @@ func clusterInit() func() {
 	clusterReady.Store(true)
 
 	go func() {
-		ticker := time.NewTicker(10 * time.Second)
+		ticker := time.NewTicker(sfuClusterHeartbeat())
 		defer ticker.Stop()
 		for range ticker.C {
 			clusterSync()
@@ -522,6 +529,20 @@ func envList(name string) []string {
 		}
 	}
 	return values
+}
+
+func sfuRoomOwnerTTL() time.Duration {
+	if raw := os.Getenv("SFU_ROOM_OWNER_TTL"); raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil && d >= time.Second && d <= 10*time.Minute { return d }
+	}
+	return 45 * time.Second
+}
+
+func sfuClusterHeartbeat() time.Duration {
+	if raw := os.Getenv("SFU_CLUSTER_HEARTBEAT"); raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil && d >= 500*time.Millisecond && d <= 1*time.Minute { return d }
+	}
+	return 10 * time.Second
 }
 
 func maxRoomPeers() int {
@@ -852,9 +873,9 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 
 		publishedID := id + ":" + track.ID()
 		room.mu.Lock()
-		room.tracks[publishedID] = &PublishedTrack{ownerID: id, trackID: track.ID(), local: local}
+		room.tracks[publishedID] = &PublishedTrack{ownerID: id, trackID: track.ID(), sessionID: me.sessionID, local: local}
 		room.mu.Unlock()
-		clusterSaveTrackState(room.id, id, track.ID(), strings.ToLower(strings.Split(codec.MimeType, "/")[0]))
+		clusterSaveTrackState(room.id, id, track.ID(), me.sessionID, strings.ToLower(strings.Split(codec.MimeType, "/")[0]))
 
 		for _, target := range othersSnapshot(room, id) {
 			if sender, err := target.pc.AddTrack(local); err == nil {
@@ -1250,7 +1271,7 @@ func removePublication(room *Room, publishedID string) {
 	}
 	delete(room.tracks, publishedID)
 	remaining := make([]*Peer, 0, len(room.peers))
-	clusterRemoveTrackState(room.id, published.ownerID, published.trackID)
+	clusterRemoveTrackState(room.id, published.ownerID, published.trackID, published.sessionID)
 	for _, p := range room.peers {
 		remaining = append(remaining, p)
 	}
