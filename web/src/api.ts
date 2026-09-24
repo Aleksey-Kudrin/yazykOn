@@ -100,3 +100,49 @@ export async function sendRoomMessage(id: string, text: string): Promise<RoomMes
   if (!response.ok) throw new Error(data.error ?? "Не удалось отправить сообщение");
   return data;
 }
+
+export interface BreakoutRoom {
+  id: string;
+  name: string;
+  parentRoomId: string;
+  participants: string[];
+}
+
+export async function getBreakoutRooms(id: string): Promise<BreakoutRoom[]> {
+  const response = await fetch(`${API_URL}/api/rooms/${encodeURIComponent(id)}/breakouts`, { credentials: "include" });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error ?? "Не удалось получить breakout-комнаты");
+  return data.rooms ?? [];
+}
+
+export async function createBreakoutRoom(id: string, name: string): Promise<BreakoutRoom> {
+  const response = await fetch(`${API_URL}/api/rooms/${encodeURIComponent(id)}/breakouts`, {
+    method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error ?? "Не удалось создать breakout-комнату");
+  return data;
+}
+
+export async function assignBreakoutParticipant(roomId: string, breakoutId: string, userId: string): Promise<void> {
+  const response = await fetch(`${API_URL}/api/rooms/${encodeURIComponent(roomId)}/breakouts/${encodeURIComponent(breakoutId)}/assign`, {
+    method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ userId })
+  });
+  if (!response.ok) throw new Error("Не удалось назначить участника");
+}
+
+export async function joinBreakoutRoom(roomId: string, breakoutId: string): Promise<{ accessToken: string; parentRoomId: string; breakoutId: string }> {
+  const response = await fetch(`${API_URL}/api/rooms/${encodeURIComponent(roomId)}/breakouts/${encodeURIComponent(breakoutId)}/join`, {
+    method: "POST", credentials: "include"
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error ?? "Не удалось войти в breakout-комнату");
+  return data;
+}
+
+export async function removeBreakoutParticipant(roomId: string, breakoutId: string, userId: string): Promise<void> {
+  const response = await fetch(`${API_URL}/api/rooms/${encodeURIComponent(roomId)}/breakouts/${encodeURIComponent(breakoutId)}/participants/${encodeURIComponent(userId)}`, {
+    method: "DELETE", credentials: "include"
+  });
+  if (!response.ok) throw new Error("Не удалось удалить участника из breakout-комнаты");
+}
