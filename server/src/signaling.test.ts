@@ -78,3 +78,37 @@ test("duplicate peer id replaces the old local session without emitting a stale 
   await new Promise(resolve => setTimeout(resolve, 25));
   await closeServer(server);
 });
+
+
+test("duplicate reconnect keeps the newest local session after stale old close", async () => {
+  const server = createServer();
+  attachSignaling(server);
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", () => resolve()));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+
+  const first = connect(address.port, "stale-close-room", "peer-a");
+  await first.opened;
+  first.socket.send(JSON.stringify({ type: "join", roomId: "stale-close-room", peerId: "peer-a" }));
+  await first.nextMessage("joined");
+
+  const second = connect(address.port, "stale-close-room", "peer-a");
+  await second.opened;
+  second.socket.send(JSON.stringify({ type: "join", roomId: "stale-close-room", peerId: "peer-a" }));
+  await second.nextMessage("joined");
+  await first.nextMessage("session-replaced");
+
+  await new Promise(resolve => setTimeout(resolve, 25));
+  assert.equal(second.socket.readyState, WebSocket.OPEN);
+
+  const observer = connect(address.port, "stale-close-room", "peer-b");
+  await observer.opened;
+  observer.socket.send(JSON.stringify({ type: "join", roomId: "stale-close-room", peerId: "peer-b" }));
+  const joined = await observer.nextMessage("joined");
+  assert.deepEqual(joined.peers, ["peer-a"]);
+
+  observer.socket.close();
+  second.socket.close();
+  await new Promise(resolve => setTimeout(resolve, 25));
+  await closeServer(server);
+});
