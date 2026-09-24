@@ -154,3 +154,23 @@ func TestNegotiationFinishedQueuesPendingRenegotiation(t *testing.T) {
   if p.negotiating { t.Fatal("negotiation should be marked finished") }
   if p.negotiationPending { t.Fatal("pending flag should be consumed") }
 }
+
+func TestReplacePeerSessionPreservesPeerSlotAndHost(t *testing.T) {
+	room := &Room{id: "room-reconnect", peers: make(map[string]*Peer), tracks: make(map[string]*PublishedTrack)}
+	old := newTestPeer(t, "peer-a")
+	old.room = room
+	old.role = "host"
+	room.hostID = old.id
+	room.peers[old.id] = old
+	activePeers.Store(1)
+	newPeer := newTestPeer(t, "peer-a")
+	newPeer.room = room
+	newPeer.role = "host"
+
+	replacePeerSession(old, room)
+	room.peers[newPeer.id] = newPeer
+
+	if !old.closed { t.Fatal("old session was not closed") }
+	if got := room.hostID; got != "peer-a" { t.Fatalf("host id changed to %q", got) }
+	if _, ok := room.peers["peer-a"]; !ok { t.Fatal("peer slot was not preserved for reconnect") }
+}
