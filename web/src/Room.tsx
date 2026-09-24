@@ -76,6 +76,7 @@ export function Room({ roomId }: RoomProps) {
   const reconnectTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttempt = React.useRef(0);
   const reconnecting = React.useRef(false);
+  const selfIdRef = React.useRef("");
   const connectionGeneration = React.useRef(0);
   const [chat, setChat] = React.useState<ChatMessage[]>([]);
   const [chatText, setChatText] = React.useState("");
@@ -245,8 +246,9 @@ export function Room({ roomId }: RoomProps) {
           if (stopped || generation !== connectionGeneration.current) { ws.close(); return; }
           reconnectAttempt.current = 0;
           reconnecting.current = false;
+          setStatus("Восстанавливаем медиасессию…");
           setStatus("Подключено к языкOn SFU");
-          ws.send(JSON.stringify({ type: "join", roomId: sfuRoomId, data: { accessToken } }));
+          ws.send(JSON.stringify({ type: "join", roomId: sfuRoomId, peerId: selfIdRef.current || undefined, data: { accessToken, reconnect: Boolean(selfIdRef.current) } }));
           for (const candidate of pendingLocalIce.current) {
             ws.send(JSON.stringify({ type: "ice", roomId: sfuRoomId, data: candidate }));
           }
@@ -278,6 +280,7 @@ export function Room({ roomId }: RoomProps) {
           if (message.type === "joined") {
             const data = message.data;
             setSelfId(message.peerId);
+            selfIdRef.current = message.peerId;
             setParticipants([participantFromMeta(message.peerId, data?.peerMeta?.[message.peerId]), ...(data?.peers ?? []).map(peerId => participantFromMeta(peerId, data?.peerMeta?.[peerId]))]);
             setHostId(data?.hostId ?? message.peerId);
             setRoomLocked(Boolean(data?.locked));
@@ -416,8 +419,10 @@ export function Room({ roomId }: RoomProps) {
         ws.onclose = () => {
           if (stopped || generation !== connectionGeneration.current || socket.current !== ws) return;
           setConnected(false);
-          const attempt = Math.min(reconnectAttempt.current++, 6);
-          const delay = Math.min(30000, 1000 * 2 ** attempt);
+          const attempt = Math.min(reconnectAttempt.current, 6);
+          reconnectAttempt.current = Math.min(reconnectAttempt.current + 1, 6);
+          const baseDelay = Math.min(30000, 1000 * 2 ** attempt);
+          const delay = Math.round(baseDelay * (0.75 + Math.random() * 0.5));
           setStatus(`SFU отключён — переподключение через ${Math.ceil(delay / 1000)} с…`);
           if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
           reconnectTimer.current = setTimeout(() => {
@@ -439,6 +444,9 @@ export function Room({ roomId }: RoomProps) {
       iceRestarting.current = false;
       socket.current?.close();
       peer.current?.close();
+      socket.current = null;
+      peer.current = null;
+      reconnecting.current = false;
       pendingIce.current = [];
       pendingLocalIce.current = [];
       remoteStreams.current.clear();
