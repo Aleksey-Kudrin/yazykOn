@@ -1,6 +1,6 @@
 import React from "react";
 import { MeetingFeatureControls } from "./MeetingFeatures";
-import { accessRoom, getRoom, getRoomMembers, getRoomMessages, sendRoomMessage, setRoomMemberRole, type RoomMember } from "./api";
+import { accessRoom, getRoom, getRoomMembers, getRoomMessages, sendRoomMessage, setRoomMemberRole, getBreakoutRooms, createBreakoutRoom, assignBreakoutParticipant, joinBreakoutRoom, type BreakoutRoom, type RoomMember } from "./api";
 
 interface RoomProps { roomId: string; }
 type Participant = { peerId: string; userId?: string; role?: string };
@@ -49,6 +49,12 @@ export function Room({ roomId }: RoomProps) {
   const [remotes, setRemotes] = React.useState<Array<{ id: string; stream: MediaStream }>>([]);
   const [status, setStatus] = React.useState("Проверяем доступ к комнате…");
   const [connected, setConnected] = React.useState(false);
+  const [reconnectNonce, setReconnectNonce] = React.useState(0);
+  const [sfuRoomId, setSfuRoomId] = React.useState(roomId);
+  const [sfuAccessToken, setSfuAccessToken] = React.useState<string | null>(null);
+  const [breakouts, setBreakouts] = React.useState<BreakoutRoom[]>([]);
+  const [breakoutName, setBreakoutName] = React.useState("");
+  const [breakoutBusy, setBreakoutBusy] = React.useState(false);
   const [mic, setMic] = React.useState(true);
   const [camera, setCamera] = React.useState(true);
   const [participants, setParticipants] = React.useState<Participant[]>([]);
@@ -75,9 +81,13 @@ export function Room({ roomId }: RoomProps) {
     let stopped = false;
     async function start() {
       try {
-        const room = await getRoom(roomId);
+        const room = await getRoom(sfuRoomId);
         try { setChat(await getRoomMessages(roomId)); } catch (error) { console.warn("chat history unavailable", error); }
-        let accessToken = sessionStorage.getItem("yazykon-access-" + roomId);
+        let accessToken = sfuAccessToken ?? sessionStorage.getItem("yazykon-access-" + sfuRoomId);
+        if (sfuRoomId !== roomId && !accessToken) {
+          setStatus("Нет токена breakout-комнаты");
+          return;
+        }
         if (room.requiresPassword && !accessToken) {
           const password = window.prompt("Введите пароль комнаты");
           if (password === null) { setStatus("Вход отменён"); return; }
@@ -87,7 +97,7 @@ export function Room({ roomId }: RoomProps) {
           const access = await accessRoom(roomId);
           accessToken = access.accessToken;
         }
-        if (accessToken) sessionStorage.setItem("yazykon-access-" + roomId, accessToken);
+        if (accessToken) sessionStorage.setItem("yazykon-access-" + sfuRoomId, accessToken);
         let stream = localStream.current;
         if (!stream) {
           stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
@@ -150,7 +160,7 @@ export function Room({ roomId }: RoomProps) {
                 await pc.setLocalDescription(offer);
                 const ws = socket.current;
                 if (ws?.readyState === WebSocket.OPEN) {
-                  ws.send(JSON.stringify({ type: "offer", roomId, data: pc.localDescription }));
+                  ws.send(JSON.stringify({ type: "offer", roomId: sfuRoomId, data: pc.localDescription }));
                 }
               }).catch(error => {
                 iceRestarting.current = false;
@@ -169,15 +179,15 @@ export function Room({ roomId }: RoomProps) {
           reconnectAttempt.current = 0;
           reconnecting.current = false;
           setStatus("Подключено к языкOn SFU");
-          ws.send(JSON.stringify({ type: "join", roomId, data: { accessToken } }));
+          ws.send(JSON.stringify({ type: "join", roomId: sfuRoomId, data: { accessToken } }));
           for (const candidate of pendingLocalIce.current) {
-            ws.send(JSON.stringify({ type: "ice", roomId, data: candidate }));
+            ws.send(JSON.stringify({ type: "ice", roomId: sfuRoomId, data: candidate }));
           }
           pendingLocalIce.current = [];
           try {
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
-            ws.send(JSON.stringify({ type: "offer", roomId, data: pc.localDescription }));
+            ws.send(JSON.stringify({ type: "offer", roomId: sfuRoomId, data: pc.localDescription }));
           } catch (error) {
             console.error("initial WebRTC offer failed", error);
             setStatus("Не удалось начать WebRTC-соединение");
@@ -187,7 +197,7 @@ export function Room({ roomId }: RoomProps) {
           if (!event.candidate) return;
           const candidate = event.candidate.toJSON();
           if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: "ice", roomId, data: candidate }));
+            ws.send(JSON.stringify({ type: "ice", roomId: sfuRoomId, data: candidate }));
           } else {
             pendingLocalIce.current.push(candidate);
           }
@@ -293,7 +303,7 @@ export function Room({ roomId }: RoomProps) {
             await pc.setRemoteDescription(message.data);
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
-            ws.send(JSON.stringify({ type: "answer", roomId, data: pc.localDescription }));
+            ws.send(JSON.stringify({ type: "answer", roomId: sfuRoomId, data: pc.localDescription }));
             return;
           }
           if (message.type === "ice") {
@@ -332,7 +342,7 @@ export function Room({ roomId }: RoomProps) {
       remoteTrackStreams.current.clear();
       setRemotes([]);
     };
-  }, [roomId, reconnectNonce]);
+  }, [sfuRoomId, sfuAccessToken, reconnectNonce, roomId]);
 
   React.useEffect(() => () => {
     if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
@@ -379,6 +389,41 @@ export function Room({ roomId }: RoomProps) {
     }
   }
 
+  async function refreshBreakouts() {
+    try { setBreakouts(await getBreakoutRooms(roomId)); } catch { setBreakouts([]); }
+  }
+
+  async function createBreakout() {
+    const name = breakoutName.trim();
+    if (!name || breakoutBusy) return;
+    setBreakoutBusy(true);
+    try { await createBreakoutRoom(roomId, name); setBreakoutName(""); await refreshBreakouts(); setStatus("Breakout-комната создана"); }
+    catch { setStatus("Не удалось создать breakout-комнату"); }
+    finally { setBreakoutBusy(false); }
+  }
+
+  async function assignParticipant(breakoutId: string, userId: string) {
+    if (breakoutBusy) return;
+    setBreakoutBusy(true);
+    try { await assignBreakoutParticipant(roomId, breakoutId, userId); await refreshBreakouts(); setStatus("Участник назначен в breakout-комнату"); }
+    catch { setStatus("Не удалось назначить участника"); }
+    finally { setBreakoutBusy(false); }
+  }
+
+  async function enterBreakout(breakoutId: string) {
+    if (breakoutBusy) return;
+    setBreakoutBusy(true);
+    try { const access = await joinBreakoutRoom(roomId, breakoutId); setSfuAccessToken(access.accessToken); setSfuRoomId(access.breakoutId); setStatus("Переходим в breakout-комнату…"); }
+    catch { setStatus("Не удалось войти в breakout-комнату"); }
+    finally { setBreakoutBusy(false); }
+  }
+
+  function returnToMainRoom() {
+    const token = sessionStorage.getItem("yazykon-access-" + roomId);
+    if (!token) { setStatus("Не найден токен основной комнаты"); return; }
+    setSfuAccessToken(token); setSfuRoomId(roomId); setStatus("Возвращаемся в основную комнату…");
+  }
+
   async function refreshMembers() { try { setMembers(await getRoomMembers(roomId)); } catch { setMembers([]); } }
 
   async function changeMemberRole(userId: string, role: "cohost" | "member") { try { await setRoomMemberRole(roomId, userId, role); await refreshMembers(); setStatus("Роль участника изменена"); } catch { setStatus("Не удалось изменить роль"); } }
@@ -403,7 +448,13 @@ export function Room({ roomId }: RoomProps) {
 
   function toggleLobby() { moderate(lobby ? "lobby-off" : "lobby-on"); }
 
-  React.useEffect(() => { if (hostId === selfId) void refreshMembers(); }, [hostId, selfId, roomId]);
+  React.useEffect(() => { if (hostId === selfId) { void refreshMembers(); void refreshBreakouts(); } }, [hostId, selfId, roomId]);
+
+  React.useEffect(() => {
+    if (sfuRoomId !== roomId || hostId !== selfId) return;
+    const timer = window.setInterval(() => { void refreshBreakouts(); }, 3000);
+    return () => window.clearInterval(timer);
+  }, [sfuRoomId, roomId, hostId, selfId]);
 
   function approveWaiting(peerId: string) { setWaitingPeers(current => current.filter(id => id !== peerId)); moderate("approve", peerId); }
   function denyWaiting(peerId: string) { setWaitingPeers(current => current.filter(id => id !== peerId)); moderate("deny", peerId); }
@@ -432,13 +483,36 @@ export function Room({ roomId }: RoomProps) {
   }
 
   return <main className="meeting">
-    <header className="meeting-header"><div className="logo">язык<span>On</span></div><div className="room-code">Комната: {roomId}</div><a href="/">Выйти</a></header>
+    <header className="meeting-header"><div className="logo">язык<span>On</span></div><div className="room-code">Комната: {sfuRoomId}{sfuRoomId !== roomId ? " • breakout" : ""}</div><a href="/">Выйти</a></header>
     <section className="video-grid">
       <div className="video-tile local"><video ref={localVideo} autoPlay muted playsInline /><span>Вы</span></div>
       {remotes.map(remote => <RemoteVideo key={remote.id} id={remote.id} stream={remote.stream} />)}
       {!remotes.length && <div className="video-tile remote"><span>Ожидание участников</span></div>}
     </section>
     <div className="meeting-status">{status} {connected ? "• online" : ""}</div>
+    {hostId === selfId && sfuRoomId === roomId && <aside className="breakouts">
+      <strong>Breakout-комнаты</strong>
+      <form onSubmit={event => { event.preventDefault(); void createBreakout(); }} className="participant-controls">
+        <input value={breakoutName} onChange={event => setBreakoutName(event.target.value)} maxLength={80} placeholder="Название комнаты" />
+        <button type="submit" disabled={breakoutBusy || !breakoutName.trim()}>Создать</button>
+      </form>
+      {breakouts.length === 0 && <span className="chat-empty">Комнаты ещё не созданы</span>}
+      {breakouts.map(breakout => <div key={breakout.id} className="participant">
+        <span>{breakout.name} ({breakout.participants.length})</span>
+        <button type="button" onClick={() => void enterBreakout(breakout.id)} disabled={breakoutBusy}>Войти</button>
+        {participants.filter(p => p.userId && p.peerId !== selfId).map(p => {
+          const assigned = Boolean(p.userId && breakout.participants.includes(p.userId));
+          const member = members.find(m => m.id === p.userId);
+          return <button key={p.peerId} type="button" onClick={() => p.userId && void assignParticipant(breakout.id, p.userId)} disabled={breakoutBusy || assigned || !p.userId} title={assigned ? "Уже назначен" : "Назначить"}>
+            {assigned ? "✓ " + (member?.username ?? p.peerId.slice(0, 8)) : "+ " + (member?.username ?? p.peerId.slice(0, 8))}
+          </button>;
+        })}
+      </div>)}
+    </aside>}
+    {sfuRoomId !== roomId && <aside className="breakout-active">
+      <strong>Вы в breakout-комнате</strong>
+      <button type="button" onClick={returnToMainRoom} disabled={breakoutBusy}>↩ Вернуться в основную</button>
+    </aside>}
     <aside className="participants">
       <strong>Участники ({participants.length})</strong>
       {canModerate && <div className="participant-controls"><button type="button" onClick={toggleLobby}>{lobby ? "🚪 Выключить Lobby" : "🚪 Включить Lobby"}</button>{roomLocked ? null : null}</div>}
