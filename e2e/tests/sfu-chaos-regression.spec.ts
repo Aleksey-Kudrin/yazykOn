@@ -116,6 +116,8 @@ function trackedResources(snapshot: Metrics) {
     "yazykon_media_active_rooms",
     "yazykon_media_active_peers",
     "yazykon_media_active_tracks",
+    "yazykon_media_goroutines",
+    "yazykon_media_heap_bytes",
     "go_goroutines",
     "go_memstats_heap_alloc_bytes",
     "process_resident_memory_bytes"
@@ -193,7 +195,7 @@ test("SFU chaos regression keeps recovery latency and resource state bounded", a
     const boundedResourceGrowth = resourceDelta.flatMap(snapshot =>
       Object.entries(snapshot)
         .filter(([name, value]) =>
-          ["go_goroutines", "go_memstats_heap_alloc_bytes", "process_resident_memory_bytes"].includes(name) &&
+          ["yazykon_media_goroutines", "yazykon_media_heap_bytes", "go_goroutines", "go_memstats_heap_alloc_bytes", "process_resident_memory_bytes"].includes(name) &&
           value.growth !== null
         )
         .map(([name, value]) => ({ name, growth: value.growth as number }))
