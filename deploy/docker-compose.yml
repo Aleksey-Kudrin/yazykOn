@@ -16,6 +16,7 @@ services:
       MEDIA_CONTROL_URL: ${MEDIA_CONTROL_URL:-http://media:4000}
       MEDIA_CONTROL_SECRET: ${MEDIA_CONTROL_SECRET:-}
       WEB_ORIGINS: ${WEB_ORIGINS:-}
+      MAX_ROOM_PEERS: ${MAX_ROOM_PEERS:-32}
     expose:
       - "3000"
     depends_on:
