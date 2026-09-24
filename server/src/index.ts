@@ -405,6 +405,58 @@ app.get("/api/rooms/:id/breakouts", async (req, res) => {
   res.json({ rooms: breakoutManager.list(roomId).map(r => ({ id: r.id, name: r.name, parentRoomId: r.parentRoomId, participants: Object.keys(r.participants) })) });
 });
 
+app.post("/api/rooms/:id/breakouts/:breakoutId/assign", async (req, res) => {
+  if (!db) { res.status(503).json({ error: "DATABASE_NOT_CONFIGURED" }); return; }
+  if (!roomAccessSecret) { res.status(503).json({ error: "ROOM_ACCESS_NOT_CONFIGURED" }); return; }
+  const user = await currentUser(req);
+  if (!user) { res.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+  const roomId = req.params.id.toUpperCase();
+  const breakoutId = req.params.breakoutId.toUpperCase();
+  const owner = await db.query("SELECT owner_id FROM rooms WHERE id=$1", [roomId]);
+  if (!owner.rows[0]) { res.status(404).json({ error: "ROOM_NOT_FOUND" }); return; }
+  if (owner.rows[0].owner_id !== user.id) { res.status(403).json({ error: "OWNER_REQUIRED" }); return; }
+  const memberId = typeof req.body?.userId === "string" ? req.body.userId : "";
+  if (!memberId) { res.status(400).json({ error: "INVALID_USER_ID" }); return; }
+  const member = await db.query("SELECT 1 FROM room_members WHERE room_id=$1 AND user_id=$2", [roomId, memberId]);
+  if (!member.rows[0]) { res.status(404).json({ error: "MEMBER_NOT_FOUND" }); return; }
+  if (!breakoutManager.assign(roomId, breakoutId, memberId)) {
+    res.status(404).json({ error: "BREAKOUT_NOT_FOUND" }); return;
+  }
+  res.json({ ok: true, breakoutId, userId: memberId });
+});
+
+app.post("/api/rooms/:id/breakouts/:breakoutId/join", async (req, res) => {
+  if (!db) { res.status(503).json({ error: "DATABASE_NOT_CONFIGURED" }); return; }
+  if (!roomAccessSecret) { res.status(503).json({ error: "ROOM_ACCESS_NOT_CONFIGURED" }); return; }
+  const user = await currentUser(req);
+  if (!user) { res.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+  const roomId = req.params.id.toUpperCase();
+  const breakoutId = req.params.breakoutId.toUpperCase();
+  const member = await db.query("SELECT 1 FROM room_members WHERE room_id=$1 AND user_id=$2", [roomId, user.id]);
+  if (!member.rows[0]) { res.status(403).json({ error: "ROOM_MEMBERSHIP_REQUIRED" }); return; }
+  if (!breakoutManager.get(roomId, breakoutId)) { res.status(404).json({ error: "BREAKOUT_NOT_FOUND" }); return; }
+  if (!breakoutManager.assign(roomId, breakoutId, user.id)) {
+    res.status(409).json({ error: "BREAKOUT_ASSIGN_FAILED" }); return;
+  }
+  res.json({ accessToken: issueRoomAccessToken(breakoutId, user.id, "member"), role: "member", parentRoomId: roomId, breakoutId });
+});
+
+app.delete("/api/rooms/:id/breakouts/:breakoutId/participants/:userId", async (req, res) => {
+  if (!db) { res.status(503).json({ error: "DATABASE_NOT_CONFIGURED" }); return; }
+  const user = await currentUser(req);
+  if (!user) { res.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+  const roomId = req.params.id.toUpperCase();
+  const breakoutId = req.params.breakoutId.toUpperCase();
+  const owner = await db.query("SELECT owner_id FROM rooms WHERE id=$1", [roomId]);
+  if (!owner.rows[0]) { res.status(404).json({ error: "ROOM_NOT_FOUND" }); return; }
+  if (owner.rows[0].owner_id !== user.id) { res.status(403).json({ error: "OWNER_REQUIRED" }); return; }
+  const targetUserId = req.params.userId;
+  if (!breakoutManager.remove(roomId, breakoutId, targetUserId)) {
+    res.status(404).json({ error: "BREAKOUT_PARTICIPANT_NOT_FOUND" }); return;
+  }
+  res.json({ ok: true });
+});
+
 app.get("/api/rooms/:id/membership", async (req, res) => {
   if (!db) { res.status(503).json({ error: "DATABASE_NOT_CONFIGURED" }); return; }
   const user = await currentUser(req);
