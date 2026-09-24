@@ -13,8 +13,9 @@ type SignalMessage =
 function mediaUrl() {
   const configured = import.meta.env.VITE_MEDIA_URL;
   if (configured) {
-    const url = new URL(configured);
-    return `${url.protocol === "https:" ? "wss:" : "ws:"}//${url.host}/ws`;
+    const url = new URL(configured, window.location.origin);
+    const basePath = url.pathname.replace(/\/$/, "");
+    return `${url.protocol === "https:" ? "wss:" : "ws:"}//${url.host}${basePath}/ws`;
   }
   return `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.hostname}:4000/ws`;
 }
@@ -25,6 +26,7 @@ export function Room({ roomId }: RoomProps) {
   const peer = React.useRef<RTCPeerConnection | null>(null);
   const localStream = React.useRef<MediaStream | null>(null);
   const pendingIce = React.useRef<RTCIceCandidateInit[]>([]);
+  const remoteStreams = React.useRef(new Map<string, MediaStream>());
   const [remotes, setRemotes] = React.useState<Array<{ id: string; stream: MediaStream }>>([]);
   const [status, setStatus] = React.useState("Запуск камеры…");
   const [connected, setConnected] = React.useState(false);
@@ -45,10 +47,10 @@ export function Room({ roomId }: RoomProps) {
         for (const track of stream.getTracks()) pc.addTrack(track, stream);
 
         pc.ontrack = (event) => {
-          const stream = event.streams[0];
-          if (!stream) return;
-          const id = stream.id;
-          setRemotes(current => current.some(x => x.id === id) ? current.map(x => x.id === id ? { ...x, stream } : x) : [...current, { id, stream }]);
+          const stream = event.streams[0] ?? new MediaStream([event.track]);
+          const id = stream.id || event.track.id;
+          remoteStreams.current.set(id, stream);
+          setRemotes(Array.from(remoteStreams.current, ([streamId, remote]) => ({ id: streamId, stream: remote })));
         };
         pc.onconnectionstatechange = () => {
           setConnected(pc.connectionState === "connected");
@@ -70,7 +72,12 @@ export function Room({ roomId }: RoomProps) {
           const message = JSON.parse(event.data) as SignalMessage;
           if (message.type === "joined") { setStatus("Комната подключена"); return; }
           if (message.type === "peer-joined") { setStatus("Новый участник подключился"); return; }
-          if (message.type === "peer-left") { setStatus("Участник вышел"); return; }
+          if (message.type === "peer-left") {
+            remoteStreams.current.delete(message.peerId);
+            setRemotes(Array.from(remoteStreams.current, ([id, stream]) => ({ id, stream })));
+            setStatus("Участник вышел");
+            return;
+          }
           if (message.type === "answer") {
             await pc.setRemoteDescription(message.data);
             for (const candidate of pendingIce.current) await pc.addIceCandidate(candidate);
@@ -96,7 +103,13 @@ export function Room({ roomId }: RoomProps) {
       } catch (error) { console.error(error); setStatus("Нет доступа к камере или микрофону"); }
     }
     void start();
-    return () => { stopped = true; socket.current?.close(); peer.current?.close(); localStream.current?.getTracks().forEach(t => t.stop()); };
+    return () => {
+      stopped = true;
+      socket.current?.close();
+      peer.current?.close();
+      localStream.current?.getTracks().forEach(t => t.stop());
+      remoteStreams.current.clear();
+    };
   }, [roomId]);
 
   function toggleMic() { const next = !mic; localStream.current?.getAudioTracks().forEach(t => t.enabled = next); setMic(next); }
