@@ -120,6 +120,7 @@ jobs:
           tests/sfu-media-redis-recovery.spec.ts
           tests/sfu-concurrent-failover-redis-chaos.spec.ts
           tests/sfu-repeated-chaos-churn.spec.ts
+          --workers=1
       - name: Run consolidated failover gate
         if: always()
         env:
