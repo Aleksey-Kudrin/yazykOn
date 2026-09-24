@@ -174,3 +174,14 @@ func TestReplacePeerSessionPreservesPeerSlotAndHost(t *testing.T) {
 	if got := room.hostID; got != "peer-a" { t.Fatalf("host id changed to %q", got) }
 	if _, ok := room.peers["peer-a"]; !ok { t.Fatal("peer slot was not preserved for reconnect") }
 }
+
+
+func TestClusterTrackStateJSONRoundTrip(t *testing.T) {
+	state := clusterTrackState{PeerID: "peer-1", TrackID: "video-1", Kind: "video", UpdatedAt: time.Now().Unix()}
+	raw := mustJSON(state)
+	var got clusterTrackState
+	if err := json.Unmarshal(raw, &got); err != nil { t.Fatal(err) }
+	if got.PeerID != state.PeerID || got.TrackID != state.TrackID || got.Kind != state.Kind {
+		t.Fatalf("track state mismatch: got %+v want %+v", got, state)
+	}
+}
