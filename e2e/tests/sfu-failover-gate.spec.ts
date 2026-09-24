@@ -23,7 +23,8 @@ test("SFU failover reports consolidate into a machine-readable gate", async () =
     "sfu-failover-latency-report.json",
     "sfu-chaos-regression-report.json",
     "sfu-long-soak-report.json",
-    "sfu-performance-report.json"
+    "sfu-performance-report.json",
+    "sfu-capacity-soak-report.json"
   ];
   const reports = Object.fromEntries(files.map(file => [file, readReport(file)]));
 
