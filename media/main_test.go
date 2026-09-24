@@ -1,4 +1,6 @@
 package main
+
+
 func testAccessToken(t *testing.T, roomID, userID, role string, exp int64) string {
 	t.Helper()
 	payload, err := json.Marshal(AccessClaims{RoomID: roomID, UserID: userID, Role: role, Exp: exp})
@@ -10,7 +12,6 @@ func testAccessToken(t *testing.T, roomID, userID, role string, exp int64) strin
 }
 
 
-import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
