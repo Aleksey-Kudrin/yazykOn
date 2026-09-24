@@ -1,5 +1,7 @@
 import { createHmac } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { test, expect } from "@playwright/test";
 
 const primary = process.env.SFU_PRIMARY_URL ?? "http://127.0.0.1:4100";
@@ -194,9 +196,32 @@ test("concurrent rooms survive simultaneous SFU outage and reconnect", async ({ 
     expect(reverseRecovered.every(x => x.remoteTracks > 0 && x.remoteFrames > 0)).toBeTruthy();
 
     const finalMetrics = await metrics(primary);
+    const finalRedis = await redisState(rooms);
+    expect(finalRedis.owners.every((owner: any) => owner?.nodeId === "integration-primary")).toBeTruthy();
+    expect(finalRedis.peerCount).toBeGreaterThanOrEqual(rooms * members);
     expect(finalMetrics.peers).toBeLessThanOrEqual(baseMetrics.peers + rooms * members);
     expect(finalMetrics.rooms).toBeLessThanOrEqual(baseMetrics.rooms + rooms);
     expect(finalMetrics.tracks).toBeLessThanOrEqual(baseMetrics.tracks + rooms * members * 2);
+
+    const artifactDir = process.env.SFU_ARTIFACT_DIR ?? "artifacts";
+    fs.mkdirSync(artifactDir, { recursive: true });
+    fs.writeFileSync(path.join(artifactDir, "sfu-concurrent-media-chaos-report.json"), JSON.stringify({
+      generatedAt: new Date().toISOString(),
+      rooms,
+      members,
+      roomIds: rooms,
+      baseMetrics,
+      recoveredMetrics,
+      finalMetrics,
+      baseRedis,
+      takeover,
+      recoveredRedis,
+      reverse,
+      finalRedis,
+      peerIdentityStable: recovered.map(x => x.peerId).sort().join("|") === [...ids.values()].sort().join("|"),
+      trackIdentityCount: new Set(recovered.flatMap(x => x.tracks.map(t => t.id))).size,
+      pass: true
+    }, null, 2));
   } finally {
     try { execFileSync("docker", ["compose", "-f", compose, "start", "sfu-primary", "sfu-secondary"], { stdio: "inherit" }); } catch {}
     await Promise.all(pages.map(page => page.close()));
