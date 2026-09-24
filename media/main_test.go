@@ -1,5 +1,15 @@
 package main
 
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"testing"
+	"time"
+
+	"github.com/pion/webrtc/v4"
+)
 
 func testAccessToken(t *testing.T, roomID, userID, role string, exp int64) string {
 	t.Helper()
@@ -10,17 +20,6 @@ func testAccessToken(t *testing.T, roomID, userID, role string, exp int64) strin
 	_, _ = mac.Write([]byte(encoded))
 	return encoded + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
-
-
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/json"
-	"testing"
-	"time"
-
-	"github.com/pion/webrtc/v4"
-)
 
 func newTestPeer(t *testing.T, id string) *Peer {
 	t.Helper()
