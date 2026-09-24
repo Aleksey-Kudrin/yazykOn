@@ -1,4 +1,5 @@
 import React from "react";
+import { MeetingFeatureControls } from "./MeetingFeatures";
 import { accessRoom, getRoom, getRoomMembers, getRoomMessages, sendRoomMessage, setRoomMemberRole, type RoomMember } from "./api";
 
 interface RoomProps { roomId: string; }
@@ -456,7 +457,7 @@ export function Room({ roomId }: RoomProps) {
         <button type="submit">Отправить</button>
       </form>
     </section>
-    <nav className="controls"><button onClick={toggleMic}>{mic ? "🎙️ Микрофон" : "🔇 Микрофон"}</button><button onClick={toggleCamera}>{camera ? "📷 Камера" : "🚫 Камера"}</button><button onClick={toggleScreenShare}>{sharing ? "🛑 Остановить экран" : "🖥️ Экран"}</button><a className="leave" href="/">Завершить</a></nav>
+    <nav className="controls"><MeetingFeatureControls stream={localStream.current} /><button onClick={toggleMic}>{mic ? "🎙️ Микрофон" : "🔇 Микрофон"}</button><button onClick={toggleCamera}>{camera ? "📷 Камера" : "🚫 Камера"}</button><button onClick={toggleScreenShare}>{sharing ? "🛑 Остановить экран" : "🖥️ Экран"}</button><a className="leave" href="/">Завершить</a></nav>
   </main>;
 }
 
