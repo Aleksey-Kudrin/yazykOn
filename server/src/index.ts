@@ -244,6 +244,37 @@ app.get("/api/rooms/:id/membership", async (req, res) => {
   const result = await db.query("SELECT role FROM room_members WHERE room_id=$1 AND user_id=$2", [req.params.id.toUpperCase(), user.id]);
   res.json({ member: Boolean(result.rows[0]), role: result.rows[0]?.role ?? null });
 });
+
+app.get("/api/rooms/:id/members", async (req, res) => {
+  if (!db) { res.status(503).json({ error: "DATABASE_NOT_CONFIGURED" }); return; }
+  const user = await currentUser(req);
+  if (!user) { res.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+  const roomId = req.params.id.toUpperCase();
+  const owner = await db.query("SELECT owner_id FROM rooms WHERE id=$1", [roomId]);
+  if (!owner.rows[0]) { res.status(404).json({ error: "ROOM_NOT_FOUND" }); return; }
+  if (owner.rows[0].owner_id !== user.id) { res.status(403).json({ error: "OWNER_REQUIRED" }); return; }
+  const members = await db.query(
+    "SELECT u.id,u.username,rm.role,rm.created_at FROM room_members rm JOIN users u ON u.id=rm.user_id WHERE rm.room_id=$1 ORDER BY CASE rm.role WHEN 'host' THEN 0 WHEN 'cohost' THEN 1 ELSE 2 END,u.username",
+    [roomId]
+  );
+  res.json({ members: members.rows });
+});
+
+app.patch("/api/rooms/:id/members/:userId", async (req, res) => {
+  if (!db) { res.status(503).json({ error: "DATABASE_NOT_CONFIGURED" }); return; }
+  const user = await currentUser(req);
+  if (!user) { res.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+  const roomId = req.params.id.toUpperCase();
+  const role = req.body?.role;
+  if (role !== "cohost" && role !== "member") { res.status(400).json({ error: "INVALID_ROLE" }); return; }
+  const owner = await db.query("SELECT owner_id FROM rooms WHERE id=$1", [roomId]);
+  if (!owner.rows[0]) { res.status(404).json({ error: "ROOM_NOT_FOUND" }); return; }
+  if (owner.rows[0].owner_id !== user.id) { res.status(403).json({ error: "OWNER_REQUIRED" }); return; }
+  if (req.params.userId === user.id) { res.status(400).json({ error: "CANNOT_CHANGE_OWNER" }); return; }
+  const result = await db.query("UPDATE room_members SET role=$1 WHERE room_id=$2 AND user_id=$3 RETURNING role", [role,roomId,req.params.userId]);
+  if (!result.rows[0]) { res.status(404).json({ error: "MEMBER_NOT_FOUND" }); return; }
+  res.json({ role: result.rows[0].role });
+});
 const server = createServer(app);
 attachSignaling(server);
 
