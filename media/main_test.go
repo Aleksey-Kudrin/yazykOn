@@ -1,7 +1,22 @@
+
+func testAccessToken(t *testing.T, roomID, userID, role string, exp int64) string {
+	t.Helper()
+	payload, err := json.Marshal(AccessClaims{RoomID: roomID, UserID: userID, Role: role, Exp: exp})
+	if err != nil { t.Fatal(err) }
+	encoded := base64.RawURLEncoding.EncodeToString(payload)
+	mac := hmac.New(sha256.New, []byte("test-secret"))
+	_, _ = mac.Write([]byte(encoded))
+	return encoded + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
 package main
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/pion/webrtc/v4"
 )
@@ -108,4 +123,14 @@ func TestRoomLockState(t *testing.T) {
 	if got := room.hostID; got != "host" {
 		t.Fatalf("host id = %q, want host", got)
 	}
+}
+
+func TestVerifyRoomAccessTokenRejectsTamperingAndWrongRole(t *testing.T) {
+	t.Setenv("ROOM_ACCESS_SECRET", "test-secret")
+	token := testAccessToken(t, "ROOM1", "user-1", "member", time.Now().Unix()+60)
+	if _, ok := verifyRoomAccessToken("ROOM1", token); !ok { t.Fatal("valid token rejected") }
+	if _, ok := verifyRoomAccessToken("ROOM1", token+"x"); ok { t.Fatal("tampered token accepted") }
+	invalid := testAccessToken(t, "ROOM1", "user-1", "admin", time.Now().Unix()+60)
+	if _, ok := verifyRoomAccessToken("ROOM1", invalid); ok { t.Fatal("invalid role accepted") }
+	if _, ok := verifyRoomAccessToken("ROOM2", token); ok { t.Fatal("wrong room accepted") }
 }
