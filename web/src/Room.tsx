@@ -7,6 +7,7 @@ type SignalMessage =
   | { type: "joined"; roomId: string; peerId: string; data?: { peers: string[]; peerMeta?: Record<string, { userId?: string; role?: string }>; tracks?: number; hostId?: string; locked?: boolean; lobby?: boolean } }
   | { type: "peer-joined"; peerId: string; data?: { userId?: string; role?: string } }
   | { type: "peer-left"; peerId: string }
+  | { type: "role-updated"; data?: { userId?: string; role?: string } }
   | { type: "track-published"; peerId: string; data?: { trackId?: string } }
   | { type: "track-removed"; peerId: string; data?: { trackId?: string } }
   | { type: "chat"; peerId: string; data?: { text?: string; timestamp?: number } }
@@ -185,7 +186,7 @@ export function Room({ roomId }: RoomProps) {
           }
           if (message.type === "lobby-on") { setLobby(true); return; }
           if (message.type === "lobby-off") { setLobby(false); setWaitingPeers([]); return; }
-          if (message.type === "role-updated") { const data = JSON.parse(message.data ?? "{}"); setMembers(current => current.map(m => m.id === data.userId ? { ...m, role: data.role } : m)); return; }
+          if (message.type === "role-updated") { const data = message.data ?? {}; setParticipants(current => current.map(p => p.userId === data.userId ? { ...p, role: data.role } : p)); setMembers(current => current.map(m => m.id === data.userId ? { ...m, role: data.role as RoomMember["role"] } : m)); return; }
 
     if (message.type === "peer-joined") {
             setParticipants(current => current.some(p => p.peerId === message.peerId) ? current : [...current, { peerId: message.peerId, userId: message.data?.userId, role: message.data?.role }]);
@@ -319,7 +320,7 @@ export function Room({ roomId }: RoomProps) {
 
   async function refreshMembers() { try { setMembers(await getRoomMembers(roomId)); } catch { setMembers([]); } }
 
-  async function changeMemberRole(userId: string, role: "cohost" | "member") { try { await setRoomMemberRole(roomId, userId, role); await refreshMembers(); if (socketRef.current?.readyState === WebSocket.OPEN) socketRef.current.send(JSON.stringify({ type: "role-update", roomId, data: JSON.stringify({ userId, role }) })); setStatus("Роль участника изменена"); } catch { setStatus("Не удалось изменить роль"); } }
+  async function changeMemberRole(userId: string, role: "cohost" | "member") { try { await setRoomMemberRole(roomId, userId, role); await refreshMembers(); if (socket.current?.readyState === WebSocket.OPEN) socket.current.send(JSON.stringify({ type: "role-update", roomId, data: JSON.stringify({ userId, role }) })); setStatus("Роль участника изменена"); } catch { setStatus("Не удалось изменить роль"); } }
 
   function muteParticipant(peerId: string) {
     const ws = socket.current;
