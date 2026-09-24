@@ -40,6 +40,7 @@ test("browser WebRTC media survives SFU A loss and republishes on SFU B", async 
     javaScriptEnabled: true
   });
   await page.goto("about:blank");
+  await page.context().grantPermissions(["camera", "microphone"]);
 
   const authToken = token();
   const result = await page.evaluate(async ({ primary, secondary, roomId, authToken, ttlMs }) => {
@@ -159,7 +160,7 @@ test("browser WebRTC media survives SFU A loss and republishes on SFU B", async 
   const oldSession = before.find(track => track.peerId === result.peerId && track.kind === "video")!.sessionId;
 
   execFileSync("docker", ["compose", "-f", composeFile, "stop", "sfu-primary"], { stdio: "inherit" });
-  await page.waitForTimeout(ttlMs + 1500);
+  await page.waitForTimeout(ttlMs + 2000);
 
   const recovery = await page.evaluate(async ({ secondary, roomId, authToken, peerId }) => {
     const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
