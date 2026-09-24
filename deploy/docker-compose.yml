@@ -47,6 +47,7 @@ services:
       ROOM_ACCESS_SECRET: ${ROOM_ACCESS_SECRET:-}
       MEDIA_CONTROL_SECRET: ${MEDIA_CONTROL_SECRET:-}
       WEB_ORIGINS: ${WEB_ORIGINS:-}
+      MAX_ROOM_PEERS: ${MAX_ROOM_PEERS:-32}
     expose:
       - "4000"
     ports:
