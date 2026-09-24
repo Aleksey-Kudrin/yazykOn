@@ -112,3 +112,45 @@ test("duplicate reconnect keeps the newest local session after stale old close",
   await new Promise(resolve => setTimeout(resolve, 25));
   await closeServer(server);
 });
+
+
+test("rapid A-B-A reconnect keeps exactly one live peer", async () => {
+  const server = createServer();
+  attachSignaling(server);
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", () => resolve()));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+
+  const first = connect(address.port, "rapid-reconnect-room", "peer-a");
+  await first.opened;
+  first.socket.send(JSON.stringify({ type: "join", roomId: "rapid-reconnect-room", peerId: "peer-a" }));
+  await first.nextMessage("joined");
+
+  const second = connect(address.port, "rapid-reconnect-room", "peer-a");
+  await second.opened;
+  second.socket.send(JSON.stringify({ type: "join", roomId: "rapid-reconnect-room", peerId: "peer-a" }));
+  await second.nextMessage("joined");
+  await first.nextMessage("session-replaced");
+
+  const third = connect(address.port, "rapid-reconnect-room", "peer-a");
+  await third.opened;
+  third.socket.send(JSON.stringify({ type: "join", roomId: "rapid-reconnect-room", peerId: "peer-a" }));
+  await third.nextMessage("joined");
+  await second.nextMessage("session-replaced");
+
+  await new Promise(resolve => setTimeout(resolve, 25));
+  assert.equal(first.socket.readyState, WebSocket.CLOSED);
+  assert.equal(second.socket.readyState, WebSocket.CLOSED);
+  assert.equal(third.socket.readyState, WebSocket.OPEN);
+
+  const observer = connect(address.port, "rapid-reconnect-room", "peer-b");
+  await observer.opened;
+  observer.socket.send(JSON.stringify({ type: "join", roomId: "rapid-reconnect-room", peerId: "peer-b" }));
+  const joined = await observer.nextMessage("joined");
+  assert.deepEqual(joined.peers, ["peer-a"]);
+
+  observer.socket.close();
+  third.socket.close();
+  await new Promise(resolve => setTimeout(resolve, 25));
+  await closeServer(server);
+});
