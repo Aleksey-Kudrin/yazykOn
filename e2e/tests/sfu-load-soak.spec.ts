@@ -29,7 +29,7 @@ test("SFU load soak: concurrent participants reconnect repeatedly", async ({ bro
         connectionState: pc.connectionState,
         offerReady: Boolean(pc.localDescription?.sdp)
       };
-    }, { endpoint: primary, index }));
+    }, { endpoint: primary, index });
   }));
 
   expect(results.filter(result => result.live && result.offerReady)).toHaveLength(participants);
