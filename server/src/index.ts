@@ -594,6 +594,7 @@ app.get("/api/rooms/:id/audit", async (req, res) => {
   const owner = await db.query("SELECT owner_id FROM rooms WHERE id=$1", [roomId]);
   if (!owner.rows[0]) { res.status(404).json({ error: "ROOM_NOT_FOUND" }); return; }
   if (owner.rows[0].owner_id !== user.id) { res.status(403).json({ error: "OWNER_REQUIRED" }); return; }
+  void writeAuditEvent({ userId: user.id, roomId, action: "audit.view", ip: requestIp(req) });
   const rawLimit = Number(req.query.limit ?? 100);
   const limit = Number.isFinite(rawLimit) ? Math.min(500, Math.max(1, Math.floor(rawLimit))) : 100;
   const result = await db.query(
