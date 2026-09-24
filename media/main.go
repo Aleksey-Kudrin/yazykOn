@@ -166,6 +166,7 @@ func main() {
 	})
 	http.HandleFunc("/ws", handleWS)
 	http.HandleFunc("/control/role", handleRoleControl)
+	http.HandleFunc("/control/chat", handleChatControl)
 
 	log.Printf("языкOn custom SFU listening on :4000, media UDP :50000-50100, public ICE IPs: %v", envList("WEBRTC_PUBLIC_IP"))
 	log.Fatal(http.ListenAndServe(":4000", nil))
@@ -205,6 +206,29 @@ func handleRoleControl(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte(`{"ok":true}`))
 }
 
+func handleChatControl(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost || os.Getenv("MEDIA_CONTROL_SECRET") == "" || r.Header.Get("Authorization") != "Bearer "+os.Getenv("MEDIA_CONTROL_SECRET") {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	var message map[string]json.RawMessage
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&message); err != nil { http.Error(w, "bad request", http.StatusBadRequest); return }
+	var roomID, userID, username, messageID, textValue string
+	var timestamp int64
+	if json.Unmarshal(message["roomId"], &roomID) != nil || json.Unmarshal(message["userId"], &userID) != nil || json.Unmarshal(message["username"], &username) != nil || json.Unmarshal(message["messageId"], &messageID) != nil || json.Unmarshal(message["text"], &textValue) != nil || json.Unmarshal(message["timestamp"], &timestamp) != nil || roomID == "" || userID == "" || messageID == "" || strings.TrimSpace(textValue) == "" || len([]rune(textValue)) > 2000 {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	room := getRoom(roomID)
+	room.mu.RLock()
+	peers := make([]*Peer, 0, len(room.peers))
+	for _, p := range room.peers { if !p.waiting { peers = append(peers, p) } }
+	room.mu.RUnlock()
+	payload := mustJSON(map[string]any{"id": messageID, "userId": userID, "username": username, "text": strings.TrimSpace(textValue), "timestamp": timestamp})
+	for _, p := range peers { _ = send(p, Signal{Type: "chat", Data: payload}) }
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"ok":true}`))
+}
 func handleWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -496,29 +520,6 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 				if target.role == "host" && me.role != "host" { _ = send(me, Signal{Type: "error", Data: mustJSON(map[string]string{"code": "MODERATION_DENIED"}) }); continue }
 				if cmd.Action == "mute" { _ = send(target, Signal{Type: "muted", Data: mustJSON(map[string]string{"by": me.id}) })
 				} else { _ = send(target, Signal{Type: "removed", Data: mustJSON(map[string]string{"reason": "removed_by_host"})}); removePeer(target) }
-			}
-		case "chat":
-			var chat ChatMessage
-			if err := json.Unmarshal(msg.Data, &chat); err != nil {
-				continue
-			}
-			chat.Text = strings.TrimSpace(chat.Text)
-			if chat.Text == "" {
-				continue
-			}
-			if len([]rune(chat.Text)) > 2000 {
-				_ = send(me, Signal{Type: "error", Data: mustJSON(map[string]string{"code": "CHAT_TOO_LARGE"})})
-				continue
-			}
-			payload := mustJSON(map[string]any{"text": chat.Text, "timestamp": time.Now().UnixMilli()})
-			room.mu.RLock()
-			chatPeers := make([]*Peer, 0, len(room.peers))
-			for _, p := range room.peers {
-				chatPeers = append(chatPeers, p)
-			}
-			room.mu.RUnlock()
-			for _, target := range chatPeers {
-				_ = send(target, Signal{Type: "chat", PeerID: me.id, Data: payload})
 			}
 		case "ice":
 			var candidate webrtc.ICECandidateInit
