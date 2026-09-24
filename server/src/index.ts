@@ -1,6 +1,8 @@
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";
+import { createServer } from "node:http";
+import { attachSignaling } from "./signaling.js";
 import { createRoom, getRoom } from "./rooms.js";
 
 const app = express();
@@ -14,16 +16,14 @@ app.get("/api/health", (_req, res) => {
   res.json({
     ok: true,
     service: "yazykOn-server",
-    version: "0.1.0",
+    version: "0.2.0",
+    signaling: "/ws",
     time: new Date().toISOString()
   });
 });
 
 app.get("/api", (_req, res) => {
-  res.json({
-    name: "языкOn",
-    message: "Backend API is running"
-  });
+  res.json({ name: "языкOn", message: "Backend API is running" });
 });
 
 app.post("/api/rooms", (req, res) => {
@@ -46,6 +46,10 @@ app.get("/api/rooms/:id", (req, res) => {
   res.json(room);
 });
 
-app.listen(port, "0.0.0.0", () => {
+const server = createServer(app);
+attachSignaling(server);
+
+server.listen(port, "0.0.0.0", () => {
   console.log(`языкOn server listening on http://0.0.0.0:${port}`);
+  console.log(`языкOn signaling listening on ws://0.0.0.0:${port}/ws`);
 });
