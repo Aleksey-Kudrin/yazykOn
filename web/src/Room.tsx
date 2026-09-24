@@ -1,6 +1,6 @@
 import React from "react";
 import { MeetingFeatureControls } from "./MeetingFeatures";
-import { accessRoom, getRoom, getRoomMembers, getRoomMessages, sendRoomMessage, setRoomMemberRole, getBreakoutRooms, createBreakoutRoom, assignBreakoutParticipant, removeBreakoutParticipant, deleteBreakoutRoom, joinBreakoutRoom, type BreakoutRoom, type RoomMember } from "./api";
+import { accessRoom, getRoom, getRoomMembers, getRoomMessages, sendRoomMessage, setRoomMemberRole, getBreakoutRooms, createBreakoutRoom, assignBreakoutParticipant, removeBreakoutParticipant, deleteBreakoutRoom, joinBreakoutRoom, refreshRoomAccessToken, type BreakoutRoom, type RoomMember } from "./api";
 
 interface RoomProps { roomId: string; }
 type Participant = { peerId: string; userId?: string; role?: string };
@@ -70,6 +70,7 @@ export function Room({ roomId }: RoomProps) {
   const reconnectTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttempt = React.useRef(0);
   const reconnecting = React.useRef(false);
+  const connectionGeneration = React.useRef(0);
   const [chat, setChat] = React.useState<ChatMessage[]>([]);
   const [chatText, setChatText] = React.useState("");
   const [members, setMembers] = React.useState<RoomMember[]>([]);
@@ -79,11 +80,22 @@ export function Room({ roomId }: RoomProps) {
 
   React.useEffect(() => {
     let stopped = false;
+    const generation = ++connectionGeneration.current;
     async function start() {
       try {
         const room = await getRoom(roomId);
         try { setChat(await getRoomMessages(roomId)); } catch (error) { console.warn("chat history unavailable", error); }
         let accessToken = sfuAccessToken ?? sessionStorage.getItem("yazykon-access-" + sfuRoomId);
+        if (sfuRoomId === roomId && accessToken) {
+          try {
+            const refreshed = await refreshRoomAccessToken(roomId);
+            accessToken = refreshed.accessToken;
+            setSfuAccessToken(null);
+          } catch {
+            sessionStorage.removeItem("yazykon-access-" + roomId);
+            accessToken = null;
+          }
+        }
         if (sfuRoomId !== roomId && !accessToken) {
           setStatus("Нет токена breakout-комнаты");
           return;
@@ -173,9 +185,11 @@ export function Room({ roomId }: RoomProps) {
           }
         };
 
+        if (stopped || generation !== connectionGeneration.current) { pc.close(); return; }
         const ws = new WebSocket(mediaUrl());
         socket.current = ws;
         ws.onopen = async () => {
+          if (stopped || generation !== connectionGeneration.current) { ws.close(); return; }
           reconnectAttempt.current = 0;
           reconnecting.current = false;
           setStatus("Подключено к языкOn SFU");
@@ -203,6 +217,7 @@ export function Room({ roomId }: RoomProps) {
           }
         };
         ws.onmessage = async event => {
+          if (stopped || generation !== connectionGeneration.current || socket.current !== ws) return;
           const message = JSON.parse(event.data) as SignalMessage;
           if (message.type === "joined") {
             const data = message.data;
@@ -313,9 +328,9 @@ export function Room({ roomId }: RoomProps) {
           }
           if (message.type === "error") setStatus(`Ошибка SFU: ${message.error ?? message.data?.code ?? "UNKNOWN"}`);
         };
-        ws.onerror = () => setStatus("Ошибка соединения с SFU");
+        ws.onerror = () => { if (!stopped && generation === connectionGeneration.current && socket.current === ws) setStatus("Ошибка соединения с SFU"); };
         ws.onclose = () => {
-          if (stopped) return;
+          if (stopped || generation !== connectionGeneration.current || socket.current !== ws) return;
           setConnected(false);
           const attempt = Math.min(reconnectAttempt.current++, 6);
           const delay = Math.min(30000, 1000 * 2 ** attempt);
@@ -332,6 +347,7 @@ export function Room({ roomId }: RoomProps) {
     void start();
     return () => {
       stopped = true;
+      if (connectionGeneration.current === generation) connectionGeneration.current++;
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       socket.current?.close();
       peer.current?.close();
@@ -528,7 +544,11 @@ export function Room({ roomId }: RoomProps) {
         {participants.filter(p => p.userId && p.peerId !== selfId).map(p => {
           const assigned = Boolean(p.userId && breakout.participants.includes(p.userId));
           const member = members.find(m => m.id === p.userId);
-          return <span key={p.peerId}>{replacement}</span>;
+          return <span key={p.peerId}>
+            {assigned
+              ? <button type="button" onClick={() => p.userId && void unassignParticipant(breakout.id, p.userId)} disabled={breakoutBusy}>✓ {member?.username ?? p.peerId.slice(0, 8)}</button>
+              : <button type="button" onClick={() => p.userId && void assignParticipant(breakout.id, p.userId)} disabled={breakoutBusy || !p.userId}>+ {member?.username ?? p.peerId.slice(0, 8)}</button>}
+          </span>;
         })}
       </div>)}
     </aside>}
