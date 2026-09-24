@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"context"
 	"sync/atomic"
+	"runtime"
 	"net"
 	"os"
 	"strconv"
@@ -610,9 +611,16 @@ func main() {
 	http.HandleFunc("/control/role", handleRoleControl)
 	http.HandleFunc("/control/chat", handleChatControl)
   http.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
+    var mem runtime.MemStats
+    runtime.ReadMemStats(&mem)
     w.Header().Set("Content-Type", "text/plain; version=0.0.4")
-    _, _ = w.Write([]byte("yazykon_media_active_peers " + strconv.FormatInt(activePeers.Load(), 10) + "\n" +
-      "yazykon_media_active_rooms " + strconv.FormatInt(activeRooms.Load(), 10) + "\n"))
+    _, _ = w.Write([]byte(
+      "yazykon_media_active_peers " + strconv.FormatInt(activePeers.Load(), 10) + "\n" +
+      "yazykon_media_active_rooms " + strconv.FormatInt(activeRooms.Load(), 10) + "\n" +
+      "yazykon_media_goroutines " + strconv.Itoa(runtime.NumGoroutine()) + "\n" +
+      "yazykon_media_heap_bytes " + strconv.FormatUint(mem.HeapAlloc, 10) + "\n" +
+      "yazykon_media_alloc_bytes_total " + strconv.FormatUint(mem.TotalAlloc, 10) + "\n" +
+      "yazykon_media_gc_cycles_total " + strconv.FormatUint(uint64(mem.NumGC), 10) + "\n"))
   })
   srv := &http.Server{Addr: ":4000", Handler: nil}
   go func() {
