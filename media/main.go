@@ -163,9 +163,40 @@ func main() {
 		_, _ = w.Write([]byte(`{"ok":true,"service":"yazykOn-sfu","version":"0.5.0","mediaUdpRange":"50000-50100"}`))
 	})
 	http.HandleFunc("/ws", handleWS)
+	http.HandleFunc("/control/role", handleRoleControl)
 
 	log.Printf("языкOn custom SFU listening on :4000, media UDP :50000-50100, public ICE IPs: %v", envList("WEBRTC_PUBLIC_IP"))
 	log.Fatal(http.ListenAndServe(":4000", nil))
+}
+
+func handleRoleControl(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost || os.Getenv("MEDIA_CONTROL_SECRET") == "" || r.Header.Get("Authorization") != "Bearer "+os.Getenv("MEDIA_CONTROL_SECRET") {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	var update RoleUpdate
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&update); err != nil || update.RoomID == "" || update.UserID == "" || (update.Role != "cohost" && update.Role != "member") {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	room := getRoom(update.RoomID)
+	room.mu.RLock()
+	var target *Peer
+	peers := make([]*Peer, 0, len(room.peers))
+	for _, p := range room.peers {
+		if p.userID == update.UserID { target = p }
+		if !p.waiting { peers = append(peers, p) }
+	}
+	room.mu.RUnlock()
+	if target == nil { w.WriteHeader(http.StatusNotFound); return }
+	target.mu.Lock()
+	if target.role != "host" { target.role = update.Role }
+	newRole := target.role
+	target.mu.Unlock()
+	payload := mustJSON(map[string]string{"userId": target.userID, "role": newRole})
+	for _, p := range peers { _ = send(p, Signal{Type: "role-updated", PeerID: target.id, Data: payload}) }
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte("{"ok":true}"))
 }
 
 func handleWS(w http.ResponseWriter, r *http.Request) {
