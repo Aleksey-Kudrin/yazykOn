@@ -281,4 +281,4 @@ attachSignaling(server);
 initDatabase().then(() => server.listen(port, "0.0.0.0", () => {
   console.log(`языкOn server listening on http://0.0.0.0:${port}`);
   console.log(`языкOn signaling listening on ws://0.0.0.0:${port}/ws`);
-});
+}));
