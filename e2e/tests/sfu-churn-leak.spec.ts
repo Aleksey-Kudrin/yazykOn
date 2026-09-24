@@ -8,6 +8,10 @@ const redisUrl = process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
 const secret = process.env.ROOM_ACCESS_SECRET ?? "integration-secret";
 const rounds = Math.max(5, Number(process.env.SFU_CHURN_ROUNDS ?? 12));
 const artifactDir = process.env.SFU_ARTIFACT_DIR ?? "artifacts";
+const maxActivePeerDelta = Number(process.env.SFU_CHURN_MAX_ACTIVE_DELTA ?? 1);
+const maxRoomDelta = Number(process.env.SFU_CHURN_MAX_ROOM_DELTA ?? 0);
+const maxTrackDelta = Number(process.env.SFU_CHURN_MAX_TRACK_DELTA ?? 0);
+const maxResourceGrowth = Number(process.env.SFU_CHURN_MAX_RESOURCE_GROWTH ?? 0.2);
 
 function token(roomId: string, userId: string) {
   const payload = Buffer.from(JSON.stringify({
@@ -104,7 +108,36 @@ test("SFU repeated room churn leaves no Redis peer/session state", async () => {
     }
     fs.mkdirSync(artifactDir, { recursive: true });
     const metricsAfter = await runtimeMetrics();
-    fs.writeFileSync(path.join(artifactDir, "sfu-churn-leak-report.json"), JSON.stringify({ rounds, rooms: roomIds.length, durationMs: Date.now() - started, cleanupMs, maxCleanupMs: Math.max(0, ...cleanupMs), metricsBefore, metricsAfter, pass: cleanupMs.length === roomIds.length }, null, 2));
+    const metric = (name: string) => {
+      const before = Number(metricsBefore[name]);
+      const after = Number(metricsAfter[name]);
+      return Number.isFinite(before) && Number.isFinite(after) ? { before, after, delta: after - before } : null;
+    };
+    const peers = metric("yazykon_media_active_peers");
+    const roomsMetric = metric("yazykon_media_active_rooms");
+    const tracks = metric("yazykon_media_active_tracks");
+    const goroutines = metric("yazykon_media_goroutines");
+    const heap = metric("yazykon_media_heap_bytes");
+    const heapGrowth = heap && heap.before > 0 ? (heap.after - heap.before) / heap.before : 0;
+    const resourceChecks = {
+      activePeers: !peers || peers.delta <= maxActivePeerDelta,
+      activeRooms: !roomsMetric || roomsMetric.delta <= maxRoomDelta,
+      activeTracks: !tracks || tracks.delta <= maxTrackDelta,
+      heapGrowth: !heap || heapGrowth <= maxResourceGrowth
+    };
+    const pass = cleanupMs.length === roomIds.length && Object.values(resourceChecks).every(Boolean);
+    fs.writeFileSync(path.join(artifactDir, "sfu-churn-leak-report.json"), JSON.stringify({
+      rounds, rooms: roomIds.length, durationMs: Date.now() - started,
+      cleanupMs, maxCleanupMs: Math.max(0, ...cleanupMs),
+      budgets: { maxActivePeerDelta, maxRoomDelta, maxTrackDelta, maxResourceGrowth },
+      metricsBefore, metricsAfter,
+      deltas: { peers, rooms: roomsMetric, tracks, goroutines, heap, heapGrowth },
+      resourceChecks, pass
+    }, null, 2));
+    expect(resourceChecks.activePeers).toBeTruthy();
+    expect(resourceChecks.activeRooms).toBeTruthy();
+    expect(resourceChecks.activeTracks).toBeTruthy();
+    expect(resourceChecks.heapGrowth).toBeTruthy();
   } finally {
     for (const roomId of roomIds) {
       const keys = await roomKeys(client, roomId);
@@ -113,7 +146,7 @@ test("SFU repeated room churn leaves no Redis peer/session state", async () => {
         `yazykon:sfu:state:${roomId}`,
         `yazykon:sfu:tracks:${roomId}`
       ];
-      if (keys.peers.length || fixed.length) await client.del(...fixed, ...keys.peers);
+      if (keys.peers.length || keys.owner || keys.state || keys.tracks) await client.del(...fixed, ...keys.peers);
     }
     await client.quit();
   }
