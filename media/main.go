@@ -137,6 +137,69 @@ func clusterOwnerKey(roomID string) string {
 func clusterRoomStateKey(roomID string) string {
 	return "yazykon:sfu:state:" + roomID
 }
+func clusterRoomTracksKey(roomID string) string {
+	return "yazykon:sfu:tracks:" + roomID
+}
+
+type clusterTrackState struct {
+	PeerID string `json:"peerId"`
+	TrackID string `json:"trackId"`
+	Kind string `json:"kind"`
+	UpdatedAt int64 `json:"updatedAt"`
+}
+
+func clusterSaveTrackState(roomID, peerID, trackID, kind string) {
+	clusterMu.RLock()
+	client := clusterRedis
+	clusterMu.RUnlock()
+	if client == nil || !clusterReady.Load() { return }
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	key := clusterRoomTracksKey(roomID)
+	state := clusterTrackState{PeerID: peerID, TrackID: trackID, Kind: kind, UpdatedAt: time.Now().Unix()}
+	_ = client.HSet(ctx, key, peerID+":"+trackID, mustJSON(state)).Err()
+	_ = client.Expire(ctx, key, 90*time.Second).Err()
+}
+
+func clusterRemoveTrackState(roomID, peerID, trackID string) {
+	clusterMu.RLock()
+	client := clusterRedis
+	clusterMu.RUnlock()
+	if client == nil || !clusterReady.Load() { return }
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = client.HDel(ctx, clusterRoomTracksKey(roomID), peerID+":"+trackID).Err()
+}
+
+func clusterDeleteTrackState(roomID string) {
+	clusterMu.RLock()
+	client := clusterRedis
+	clusterMu.RUnlock()
+	if client == nil || !clusterReady.Load() { return }
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = client.Del(ctx, clusterRoomTracksKey(roomID)).Err()
+}
+
+func clusterLoadTrackStates(roomID string) []clusterTrackState {
+	clusterMu.RLock()
+	client := clusterRedis
+	clusterMu.RUnlock()
+	if client == nil || !clusterReady.Load() { return nil }
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	values, err := client.HGetAll(ctx, clusterRoomTracksKey(roomID)).Result()
+	if err != nil { return nil }
+	states := make([]clusterTrackState, 0, len(values))
+	for _, raw := range values {
+		var state clusterTrackState
+		if json.Unmarshal([]byte(raw), &state) == nil && state.PeerID != "" && state.TrackID != "" {
+			states = append(states, state)
+		}
+	}
+	return states
+}
+
 
 type clusterRoomState struct {
 	RoomID string `json:"roomId"`
@@ -791,6 +854,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		room.mu.Lock()
 		room.tracks[publishedID] = &PublishedTrack{ownerID: id, trackID: track.ID(), local: local}
 		room.mu.Unlock()
+		clusterSaveTrackState(room.id, id, track.ID(), strings.ToLower(strings.Split(codec.MimeType, "/")[0]))
 
 		for _, target := range othersSnapshot(room, id) {
 			if sender, err := target.pc.AddTrack(local); err == nil {
@@ -852,7 +916,8 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		peerMeta := make(map[string]map[string]string, len(others)+1)
 		peerMeta[id] = map[string]string{"userId": me.userID, "role": me.role}
 		for _, p := range others { peerMeta[p.id] = map[string]string{"userId": p.userID, "role": p.role} }
-		b, _ := json.Marshal(map[string]any{"peers": peerIDs(others), "peerMeta": peerMeta, "tracks": len(tracks), "hostId": hostID, "locked": locked, "lobby": lobby})
+		expectedTracks := clusterLoadTrackStates(room.id)
+		b, _ := json.Marshal(map[string]any{"peers": peerIDs(others), "peerMeta": peerMeta, "tracks": len(tracks), "expectedTracks": expectedTracks, "hostId": hostID, "locked": locked, "lobby": lobby})
 		_ = send(me, Signal{Type: "joined", RoomID: room.id, PeerID: id, Data: b})
 		for _, other := range others { _ = send(other, Signal{Type: "peer-joined", PeerID: id, Data: mustJSON(map[string]string{"userId": me.userID, "role": me.role})}) }
 	}
@@ -1152,6 +1217,7 @@ func removePeer(p *Peer) {
 	if empty {
 		clusterReleaseRoom(p.room.id)
 		clusterDeleteRoomState(p.room.id)
+		clusterDeleteTrackState(p.room.id)
 		roomsMu.Lock()
 		delete(rooms, p.room.id)
 		roomsMu.Unlock()
@@ -1184,6 +1250,7 @@ func removePublication(room *Room, publishedID string) {
 	}
 	delete(room.tracks, publishedID)
 	remaining := make([]*Peer, 0, len(room.peers))
+	clusterRemoveTrackState(room.id, published.ownerID, published.trackID)
 	for _, p := range room.peers {
 		remaining = append(remaining, p)
 	}
