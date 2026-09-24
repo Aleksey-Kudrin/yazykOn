@@ -4,7 +4,9 @@ interface RoomProps { roomId: string; }
 type SignalMessage =
   | { type: "joined"; roomId: string; peerId: string; data?: { peers: string[]; tracks?: number } }
   | { type: "peer-joined"; peerId: string }
-  | { type: "peer-left"; peerId: string }\n  | { type: "track-published"; peerId: string; data?: { trackId?: string } }\n  | { type: "track-removed"; peerId: string; data?: { trackId?: string } }
+  | { type: "peer-left"; peerId: string }
+  | { type: "track-published"; peerId: string; data?: { trackId?: string } }
+  | { type: "track-removed"; peerId: string; data?: { trackId?: string } }
   | { type: "offer"; data: RTCSessionDescriptionInit }
   | { type: "answer"; data: RTCSessionDescriptionInit }
   | { type: "ice"; data: RTCIceCandidateInit }
@@ -27,13 +29,17 @@ export function Room({ roomId }: RoomProps) {
   const localStream = React.useRef<MediaStream | null>(null);
   const pendingIce = React.useRef<RTCIceCandidateInit[]>([]);
   const pendingLocalIce = React.useRef<RTCIceCandidateInit[]>([]);
-  const remoteStreams = React.useRef(new Map<string, MediaStream>());\n  const remoteOwners = React.useRef(new Map<string, string>());\n  const remoteTrackStreams = React.useRef(new Map<string, string>());
+  const remoteStreams = React.useRef(new Map<string, MediaStream>());
+  const remoteOwners = React.useRef(new Map<string, string>());
+  const remoteTrackStreams = React.useRef(new Map<string, string>());
   const [remotes, setRemotes] = React.useState<Array<{ id: string; stream: MediaStream }>>([]);
   const [status, setStatus] = React.useState("Запуск камеры…");
   const [connected, setConnected] = React.useState(false);
   const [mic, setMic] = React.useState(true);
   const [camera, setCamera] = React.useState(true);
   const [participants, setParticipants] = React.useState<string[]>([]);
+  const [sharing, setSharing] = React.useState(false);
+  const screenTrack = React.useRef<MediaStreamTrack | null>(null);
 
   React.useEffect(() => {
     let stopped = false;
@@ -155,12 +161,49 @@ export function Room({ roomId }: RoomProps) {
       socket.current?.close();
       peer.current?.close();
       localStream.current?.getTracks().forEach(t => t.stop());
-      remoteStreams.current.clear();\n      remoteOwners.current.clear();\n      remoteTrackStreams.current.clear();
+      screenTrack.current?.stop();
+      screenTrack.current = null;
+      remoteStreams.current.clear();
+      remoteOwners.current.clear();
+      remoteTrackStreams.current.clear();
     };
   }, [roomId]);
 
   function toggleMic() { const next = !mic; localStream.current?.getAudioTracks().forEach(t => t.enabled = next); setMic(next); }
   function toggleCamera() { const next = !camera; localStream.current?.getVideoTracks().forEach(t => t.enabled = next); setCamera(next); }
+
+  async function toggleScreenShare() {
+    const pc = peer.current;
+    const stream = localStream.current;
+    if (!pc || !stream) return;
+    if (sharing) {
+      const cameraTrack = stream.getVideoTracks().find(track => track !== screenTrack.current);
+      const sender = pc.getSenders().find(item => item.track === screenTrack.current);
+      if (sender && cameraTrack) await sender.replaceTrack(cameraTrack);
+      screenTrack.current?.stop();
+      screenTrack.current = null;
+      setSharing(false);
+      return;
+    }
+    try {
+      const display = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      const track = display.getVideoTracks()[0];
+      const sender = pc.getSenders().find(item => item.track?.kind === "video");
+      if (!sender) { track.stop(); return; }
+      await sender.replaceTrack(track);
+      screenTrack.current = track;
+      setSharing(true);
+      track.onended = () => {
+        const cameraTrack = stream.getVideoTracks()[0];
+        void sender.replaceTrack(cameraTrack).then(() => {
+          screenTrack.current = null;
+          setSharing(false);
+        });
+      };
+    } catch (error) {
+      console.warn("screen sharing cancelled", error);
+    }
+  }
 
   return <main className="meeting">
     <header className="meeting-header"><div className="logo">язык<span>On</span></div><div className="room-code">Комната: {roomId}</div><a href="/">Выйти</a></header>
@@ -174,7 +217,7 @@ export function Room({ roomId }: RoomProps) {
       <strong>Участники ({participants.length})</strong>
       {participants.map(id => <div key={id} className="participant">{id === participants[0] ? "Вы" : "Участник"} <code>{id.slice(0, 8)}</code></div>)}
     </aside>
-    <nav className="controls"><button onClick={toggleMic}>{mic ? "🎙️ Микрофон" : "🔇 Микрофон"}</button><button onClick={toggleCamera}>{camera ? "📷 Камера" : "🚫 Камера"}</button><a className="leave" href="/">Завершить</a></nav>
+    <nav className="controls"><button onClick={toggleMic}>{mic ? "🎙️ Микрофон" : "🔇 Микрофон"}</button><button onClick={toggleCamera}>{camera ? "📷 Камера" : "🚫 Камера"}</button><button onClick={toggleScreenShare}>{sharing ? "🛑 Остановить экран" : "🖥️ Экран"}</button><a className="leave" href="/">Завершить</a></nav>
   </main>;
 }
 
