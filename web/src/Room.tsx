@@ -143,7 +143,7 @@ export function Room({ roomId }: RoomProps) {
           }
 
           if (message.type === "peer-joined") {
-            if (!peer.current) await makeOffer(message.peerId);
+            setStatus("Участник подключился. Ожидание WebRTC…");
             return;
           }
 
