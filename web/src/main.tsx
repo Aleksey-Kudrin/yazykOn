@@ -1,9 +1,10 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
+import { Room } from "./Room";
 import { createRoom } from "./api";
 import "./styles.css";
 
-function App() {
+function Home() {
   const [status, setStatus] = React.useState("Проверяем сервер…");
   const [room, setRoom] = React.useState<{ id: string; name: string } | null>(null);
   const [name, setName] = React.useState("Моя конференция");
@@ -21,6 +22,8 @@ function App() {
     try {
       const created = await createRoom(name);
       setRoom(created);
+      window.history.pushState({}, "", `/room/${created.id}`);
+      window.dispatchEvent(new PopStateEvent("popstate"));
     } catch {
       setStatus("Не удалось создать конференцию");
     } finally {
@@ -55,12 +58,24 @@ function App() {
           <div className="room">
             <strong>{room.name}</strong>
             <div>Код комнаты: <code>{room.id}</code></div>
-            <a href={`/room/${room.id}`}>Открыть комнату →</a>
           </div>
         )}
       </section>
     </main>
   );
+}
+
+function App() {
+  const [path, setPath] = React.useState(window.location.pathname);
+
+  React.useEffect(() => {
+    const onPopState = () => setPath(window.location.pathname);
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  const match = path.match(/^\/room\/([A-Z0-9]+)$/i);
+  return match ? <Room roomId={match[1].toUpperCase()} /> : <Home />;
 }
 
 createRoot(document.getElementById("root")!).render(
