@@ -29,6 +29,17 @@ async function waitHealth(endpoint: string) {
   throw new Error("SFU health timeout: " + endpoint);
 }
 
+async function runtimeMetrics(endpoint: string) {
+  const response = await fetch(endpoint + "/metrics");
+  if (!response.ok) return {};
+  const text = await response.text();
+  const names = ["yazykon_media_active_peers","yazykon_media_active_rooms","yazykon_media_active_tracks"];
+  return Object.fromEntries(names.map(name => {
+    const line = text.split("\n").find(value => value.startsWith(name + " "));
+    return [name, line ? Number(line.trim().split(/\s+/)[1]) : null];
+  }));
+}
+
 async function owners(roomIds: string[]) {
   const { createClient } = await import("redis");
   const client = createClient({ url: redisUrl });
@@ -156,12 +167,19 @@ test("multi-room two-party remote media survives bidirectional SFU failover", as
       expect(b.frameCount).toBeGreaterThan(0);
       initial.push({ a, b });
     }
+    const metricsBefore = await runtimeMetrics(primary);
+    const allInitialPeerIds = initial.flatMap(x => [x.a.peerId, x.b.peerId]);
+    const allInitialTrackIds = initial.flatMap(x => [x.a.trackIds, x.b.trackIds]).flat();
+    expect(new Set(allInitialPeerIds).size).toBe(allInitialPeerIds.length);
+    expect(new Set(allInitialTrackIds).size).toBe(allInitialTrackIds.length);
+
     const before = await owners(roomIds);
     expect(before.every(x => x.owner?.nodeId === "integration-primary")).toBeTruthy();
 
     execFileSync("docker", ["compose", "-f", composeFile, "stop", "sfu-primary"], { stdio: "inherit" });
     await new Promise(resolve => setTimeout(resolve, ttlMs + 1500));
     const takeover = await owners(roomIds);
+    expect(takeover).toHaveLength(roomIds.length);
     expect(takeover.every(x => x.owner?.nodeId === "integration-secondary")).toBeTruthy();
 
     const recovered: any[] = [];
@@ -184,6 +202,12 @@ test("multi-room two-party remote media survives bidirectional SFU failover", as
     const reverseOwners = await owners(roomIds);
     expect(reverseOwners.every(x => x.owner?.nodeId === "integration-primary")).toBeTruthy();
 
+    const metricsAfter = await runtimeMetrics(primary);
+    const recoveredPeerIds = recovered.flatMap(x => [x.a.peerId, x.b.peerId]);
+    const recoveredTrackIds = recovered.flatMap(x => [x.a.trackIds, x.b.trackIds]).flat();
+    expect(new Set(recoveredPeerIds).size).toBe(recoveredPeerIds.length);
+    expect(new Set(recoveredTrackIds).size).toBe(recoveredTrackIds.length);
+
     const reverse: any[] = [];
     for (let i = 0; i < rooms; i++) {
       const a = await connect(pages[i * 2], primary, roomIds[i], "room-" + i + "-a", initial[i].a.peerId);
@@ -199,6 +223,16 @@ test("multi-room two-party remote media survives bidirectional SFU failover", as
     const report = {
       generatedAt: new Date().toISOString(), rooms, roomIds,
       before, takeover, reverseOwners, initial, recovered, reverse,
+      metricsBefore, metricsAfter,
+      metricDelta: {
+        activePeers: Number(metricsAfter.yazykon_media_active_peers) - Number(metricsBefore.yazykon_media_active_peers),
+        activeRooms: Number(metricsAfter.yazykon_media_active_rooms) - Number(metricsBefore.yazykon_media_active_rooms),
+        activeTracks: Number(metricsAfter.yazykon_media_active_tracks) - Number(metricsBefore.yazykon_media_active_tracks)
+      },
+      uniqueInitialPeers: new Set(allInitialPeerIds).size === allInitialPeerIds.length,
+      uniqueInitialTracks: new Set(allInitialTrackIds).size === allInitialTrackIds.length,
+      uniqueRecoveredPeers: new Set(recoveredPeerIds).size === recoveredPeerIds.length,
+      uniqueRecoveredTracks: new Set(recoveredTrackIds).size === recoveredTrackIds.length,
       pass: initial.every(x => x.b.remoteTracks > 0 && x.b.frameCount > 0)
         && recovered.every(x => x.a.peerId && x.b.peerId && x.b.remoteTracks > 0 && x.b.frameCount > 0)
         && reverse.every(x => x.a.peerId && x.b.peerId && x.b.remoteTracks > 0 && x.b.frameCount > 0)
