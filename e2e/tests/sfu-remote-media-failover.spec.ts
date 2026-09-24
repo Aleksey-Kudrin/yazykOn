@@ -163,5 +163,36 @@ test("two participants recover remote media after SFU failover", async ({ browse
   }
 
   execFileSync("docker", ["compose", "-f", composeFile, "start", "sfu-primary"], { stdio: "inherit" });
+  for (let attempt = 0; attempt < 30; attempt++) {
+    try {
+      const health = await fetch(primary + "/health");
+      if (health.ok) break;
+    } catch {}
+    await new Promise(resolve => setTimeout(resolve, 500));
+    if (attempt === 29) throw new Error("SFU primary did not recover");
+  }
+
+  const roundTrip = await Promise.all([
+    connect(pages[0], primary, "p1", recovered[0].peerId),
+    connect(pages[1], primary, "p2", recovered[1].peerId)
+  ]);
+
+  expect(roundTrip[0].peerId).toBe(first.peerId);
+  expect(roundTrip[1].peerId).toBe(second.peerId);
+  expect(roundTrip[0].remotePeers).toContain(second.peerId);
+  expect(roundTrip[1].remotePeers).toContain(first.peerId);
+  await Promise.all(roundTrip.map((_, index) => waitForFrame(pages[index])));
+
+  const roundTripMedia = await Promise.all(pages.map(page => page.evaluate(() =>
+    [...document.querySelectorAll("video")].map(video => ({
+      readyState: video.readyState,
+      width: video.videoWidth,
+      height: video.videoHeight
+    }))
+  )));
+  for (const videos of roundTripMedia) {
+    expect(videos.some(video => video.readyState >= 2 && video.width > 0 && video.height > 0)).toBeTruthy();
+  }
+
   await Promise.all(pages.map(page => page.close()));
 });
