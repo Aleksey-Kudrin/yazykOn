@@ -11,7 +11,7 @@ type SignalMessage =
   | { type: "role-updated"; data?: { userId?: string; role?: string } }
   | { type: "track-published"; peerId: string; data?: { trackId?: string } }
   | { type: "track-removed"; peerId: string; data?: { trackId?: string } }
-  | { type: "chat"; peerId: string; data?: { text?: string; timestamp?: number } }
+  | { type: "chat"; peerId: string; data?: { id?: string; userId?: string; username?: string; text?: string; timestamp?: number } }
   | { type: "removed"; data?: { reason?: string } }
   | { type: "muted"; data?: { by?: string } }
   | { type: "host-changed"; peerId: string }
