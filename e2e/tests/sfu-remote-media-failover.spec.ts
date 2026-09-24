@@ -99,6 +99,15 @@ async function connect(page: import("@playwright/test").Page, endpoint: string, 
   }, { endpoint, roomId, accessToken: token(userId), peerId });
 }
 
+async function redisPeerKeys() {
+  const { createClient } = await import("redis");
+  const client = createClient({ url: process.env.REDIS_URL ?? "redis://127.0.0.1:6379" });
+  await client.connect();
+  const keys = await client.keys("yazykon:sfu:peer:*");
+  await client.quit();
+  return keys;
+}
+
 async function waitForFrame(page: import("@playwright/test").Page) {
   await page.evaluate(() => new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("remote video frame timeout")), 15000);
@@ -136,6 +145,9 @@ test("two participants recover remote media through repeated SFU failover cycles
     peerIds = [first.peerId, second.peerId];
     expect(second.remotePeers).toContain(first.peerId);
     await Promise.all(pages.map(page => waitForFrame(page)));
+    const initialPeerSet = new Set(peerIds);
+    expect(initialPeerSet.size).toBe(peerIds.length);
+    const initialPeerKeys = await redisPeerKeys();
 
     for (let cycle = 0; cycle < 4; cycle++) {
       const nextEndpoint = endpoint === primary ? secondary : primary;
@@ -158,6 +170,11 @@ test("two participants recover remote media through repeated SFU failover cycles
       expect(recovered[1].peerId).toBe(peerIds[1]);
       expect(recovered[0].remotePeers).toContain(peerIds[1]);
       expect(recovered[1].remotePeers).toContain(peerIds[0]);
+      const recoveredIds = recovered.map(result => result.peerId);
+      expect(new Set(recoveredIds).size).toBe(recoveredIds.length);
+      expect(recoveredIds).toEqual(peerIds);
+      const peerKeys = await redisPeerKeys();
+      expect(peerKeys.length).toBeLessThanOrEqual(initialPeerKeys.length + 1);
 
       await Promise.all(pages.map(page => waitForFrame(page)));
 
@@ -176,6 +193,7 @@ test("two participants recover remote media through repeated SFU failover cycles
         ((window as any).__remoteFailoverConnectionStates ?? []).map((pc: RTCPeerConnection) => pc.connectionState)
       )));
       expect(connectionStates.every(states => states.some(state => state === "connected" || state === "completed"))).toBeTruthy();
+      expect(connectionStates.every(states => states.filter(state => state === "connected" || state === "completed").length <= 1)).toBeTruthy();
 
       const recoveryMs = Date.now() - startedAt;
       expect(recoveryMs).toBeLessThan(Number(process.env.SFU_FAILOVER_SLA_MS ?? 15000));
@@ -223,6 +241,8 @@ test("four participants recover remote media through repeated SFU failover cycle
     }
 
     await Promise.all(pages.map(page => waitForFrame(page)));
+    expect(new Set(peerIds).size).toBe(peerIds.length);
+    const initialPeerKeys = await redisPeerKeys();
 
     for (let cycle = 0; cycle < 4; cycle++) {
       const nextEndpoint = endpoint === primary ? secondary : primary;
@@ -245,6 +265,9 @@ test("four participants recover remote media through repeated SFU failover cycle
           if (otherPeerId !== peerIds[i]) expect(result.remotePeers).toContain(otherPeerId);
         }
       });
+      expect(new Set(recovered.map(result => result.peerId)).size).toBe(peerIds.length);
+      const peerKeys = await redisPeerKeys();
+      expect(peerKeys.length).toBeLessThanOrEqual(initialPeerKeys.length + 1);
 
       await Promise.all(pages.map(page => waitForFrame(page)));
 
