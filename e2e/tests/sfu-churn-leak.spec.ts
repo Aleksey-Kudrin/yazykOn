@@ -16,6 +16,27 @@ function token(roomId: string, userId: string) {
   return `${payload}.${createHmac("sha256", secret).update(payload).digest("base64url")}`;
 }
 
+async function runtimeMetrics() {
+  try {
+    const response = await fetch(endpoint + "/metrics");
+    if (!response.ok) return {};
+    const body = await response.text();
+    const names = [
+      "yazykon_media_active_peers",
+      "yazykon_media_active_rooms",
+      "yazykon_media_active_tracks",
+      "yazykon_media_goroutines",
+      "yazykon_media_heap_bytes"
+    ];
+    return Object.fromEntries(names.map(name => {
+      const line = body.split("\n").find(value => value.startsWith(name + " "));
+      return [name, line ? Number(line.trim().split(/\s+/)[1]) : null];
+    }));
+  } catch {
+    return {};
+  }
+}
+
 function joinAndClose(roomId: string, userId: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(endpoint.replace(/^http/, "ws") + "/ws");
@@ -57,6 +78,7 @@ test("SFU repeated room churn leaves no Redis peer/session state", async () => {
 
   const roomIds: string[] = [];
   const cleanupMs: number[] = [];
+  const metricsBefore = await runtimeMetrics();
   const started = Date.now();
   try {
     for (let i = 0; i < rounds; i++) {
@@ -81,7 +103,8 @@ test("SFU repeated room churn leaves no Redis peer/session state", async () => {
       expect(cleaned, `Redis state leaked for ${roomId}`).toBeTruthy();
     }
     fs.mkdirSync(artifactDir, { recursive: true });
-    fs.writeFileSync(path.join(artifactDir, "sfu-churn-leak-report.json"), JSON.stringify({ rounds, rooms: roomIds.length, durationMs: Date.now() - started, cleanupMs, maxCleanupMs: Math.max(0, ...cleanupMs), pass: cleanupMs.length === roomIds.length }, null, 2));
+    const metricsAfter = await runtimeMetrics();
+    fs.writeFileSync(path.join(artifactDir, "sfu-churn-leak-report.json"), JSON.stringify({ rounds, rooms: roomIds.length, durationMs: Date.now() - started, cleanupMs, maxCleanupMs: Math.max(0, ...cleanupMs), metricsBefore, metricsAfter, pass: cleanupMs.length === roomIds.length }, null, 2));
   } finally {
     for (const roomId of roomIds) {
       const keys = await roomKeys(client, roomId);
