@@ -190,18 +190,20 @@ export async function redisClaimRoom(roomId: string, nodeId: string, ttlSeconds 
   const key = `yazykon:room-owner:${roomId}`;
   const claimed = await redis.set(key, nodeId, { NX: true, EX: ttlSeconds });
   if (claimed === "OK") return nodeId;
-  const owner = await redis.get(key);
-  return owner === nodeId ? nodeId : owner;
+  return await redis.get(key);
 }
 
 export async function redisReleaseRoom(roomId: string, nodeId: string) {
   const redis = await getRedis();
   if (!redis) return false;
   const key = `yazykon:room-owner:${roomId}`;
-  const owner = await redis.get(key);
-  if (owner !== nodeId) return false;
-  await redis.del(key);
-  return true;
+  const result = await redis.eval(
+    `local owner = redis.call("GET", KEYS[1])
+     if owner ~= ARGV[1] then return 0 end
+     return redis.call("DEL", KEYS[1])`,
+    { keys: [key], arguments: [nodeId] }
+  );
+  return Number(result) === 1;
 }
 
 export async function closeRedis() {
