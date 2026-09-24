@@ -163,8 +163,8 @@ func clusterSaveTrackState(roomID, peerID, trackID, sessionID, kind string) {
 	defer cancel()
 	key := clusterRoomTracksKey(roomID)
 	state := clusterTrackState{PeerID: peerID, TrackID: trackID, SessionID: sessionID, Kind: kind, UpdatedAt: time.Now().Unix()}
-	_ = client.HSet(ctx, key, peerID+":"+trackID, mustJSON(state)).Err()
-	_ = client.Expire(ctx, key, 90*time.Second).Err()
+	const saveScript = `redis.call("HSET", KEYS[1], ARGV[1], ARGV[2]); return redis.call("PEXPIRE", KEYS[1], ARGV[3])`
+	_, _ = client.Eval(ctx, saveScript, []string{key}, peerID+":"+trackID, mustJSON(state), "90000").Result()
 }
 
 func clusterRemoveTrackState(roomID, peerID, trackID, sessionID string) {
