@@ -121,7 +121,7 @@ async function waitForFrame(page: import("@playwright/test").Page) {
       requestAnimationFrame(check);
     };
     check();
-  });
+  }));
 }
 
 test("two participants recover remote media through repeated SFU failover cycles", async ({ browser }) => {
