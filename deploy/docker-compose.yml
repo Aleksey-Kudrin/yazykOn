@@ -12,11 +12,34 @@ services:
     build:
       context: ../media
     restart: unless-stopped
+    environment:
+      WEBRTC_PUBLIC_IP: ${WEBRTC_PUBLIC_IP:-}
     expose:
       - "4000"
     ports:
       - "4000:4000/tcp"
       - "50000-50100:50000-50100/udp"
+
+  turn:
+    image: coturn/coturn:4.18.0
+    restart: unless-stopped
+    command:
+      - --log-file=stdout
+      - --fingerprint
+      - --lt-cred-mech
+      - --realm=${TURN_REALM:-yazykon.local}
+      - --user=${TURN_USERNAME:-yazykon:change-me}:${TURN_PASSWORD:-change-me}
+      - --min-port=49160
+      - --max-port=49200
+      - --no-multicast-peers
+      - --no-cli
+      - --external-ip=${TURN_PUBLIC_IP:-127.0.0.1}
+    ports:
+      - "3478:3478/tcp"
+      - "3478:3478/udp"
+      - "5349:5349/tcp"
+      - "5349:5349/udp"
+      - "49160-49200:49160-49200/udp"
 
   web:
     build:
@@ -24,10 +47,15 @@ services:
       args:
         VITE_API_URL: ""
         VITE_MEDIA_URL: "/media"
+        VITE_STUN_URL: "${VITE_STUN_URL:-stun:stun.l.google.com:19302}"
+        VITE_TURN_URL: "${VITE_TURN_URL:-}"
+        VITE_TURN_USERNAME: "${TURN_USERNAME:-}"
+        VITE_TURN_CREDENTIAL: "${TURN_PASSWORD:-}"
     restart: unless-stopped
     depends_on:
       - server
       - media
+      - turn
     ports:
       - "8080:80"
     volumes:
