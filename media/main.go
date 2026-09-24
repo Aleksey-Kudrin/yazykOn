@@ -50,12 +50,15 @@ type Peer struct {
 	published      map[string]*webrtc.TrackLocalStaticRTP
 	subscriptions  map[string]*webrtc.RTPSender
 	pendingICE      []webrtc.ICECandidateInit
+	waiting         bool
+	pendingOffer    *webrtc.SessionDescription
 }
 
 type Room struct {
 	id     string
 	hostID string
 	locked bool
+	lobby  bool
 	mu     sync.RWMutex
 	peers  map[string]*Peer
 	tracks map[string]*PublishedTrack
@@ -169,13 +172,15 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 	me := &Peer{id: id, room: room, conn: conn, pc: pc, published: make(map[string]*webrtc.TrackLocalStaticRTP), subscriptions: make(map[string]*webrtc.RTPSender)}
 
 	room.mu.Lock()
+	me.waiting = room.lobby && id != hostID
 	room.peers[id] = me
 	others := make([]*Peer, 0, len(room.peers)-1)
 	for pid, p := range room.peers {
-		if pid != id {
+		if pid != id && !p.waiting {
 			others = append(others, p)
 		}
 	}
+	isWaiting := me.waiting
 	tracks := make([]*PublishedTrack, 0, len(room.tracks))
 	for _, t := range room.tracks {
 		tracks = append(tracks, t)
@@ -232,6 +237,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		removePublication(room, publishedID)
 	})
 
+	if !isWaiting {
 	for _, t := range tracks {
 		if t.ownerID == id {
 			continue
@@ -245,6 +251,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 			_ = send(me, Signal{Type: "track-published", PeerID: t.ownerID, Data: mustJSON(map[string]string{"trackId": t.trackID})})
 		}
 	}
+	}
 
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed {
@@ -254,11 +261,14 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 
 	room.mu.RLock()
 	locked := room.locked
+	lobby := room.lobby
 	room.mu.RUnlock()
-	b, _ := json.Marshal(map[string]any{"peers": peerIDs(others), "tracks": len(tracks), "hostId": hostID, "locked": locked})
-	_ = send(me, Signal{Type: "joined", RoomID: room.id, PeerID: id, Data: b})
-	for _, other := range others {
-		_ = send(other, Signal{Type: "peer-joined", PeerID: id})
+	if isWaiting {
+		_ = send(me, Signal{Type: "lobby-waiting", RoomID: room.id, PeerID: id})
+	} else {
+		b, _ := json.Marshal(map[string]any{"peers": peerIDs(others), "tracks": len(tracks), "hostId": hostID, "locked": locked, "lobby": lobby})
+		_ = send(me, Signal{Type: "joined", RoomID: room.id, PeerID: id, Data: b})
+		for _, other := range others { _ = send(other, Signal{Type: "peer-joined", PeerID: id}) }
 	}
 	// The browser's initial offer/answer establishes the connection. Existing
 	// remote tracks are already attached above and are included in that answer.
@@ -275,6 +285,13 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if msg.Type == "offer" {
+				me.mu.Lock()
+				if me.waiting {
+					me.pendingOffer = &desc
+					me.mu.Unlock()
+					continue
+				}
+				me.mu.Unlock()
 				// Block server-initiated renegotiation while answering the
 				// browser's offer. Any track changes observed by OnTrack are
 				// queued and renegotiated after this exchange becomes stable.
@@ -311,45 +328,81 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 		case "moderate":
 			var cmd ModerationCommand
-			if json.Unmarshal(msg.Data, &cmd) != nil || cmd.Action == "" {
-				continue
-			}
+			if json.Unmarshal(msg.Data, &cmd) != nil || cmd.Action == "" { continue }
 			if me.id != roomHostID(room) {
 				_ = send(me, Signal{Type: "error", Data: mustJSON(map[string]string{"code": "MODERATION_DENIED"})})
 				continue
 			}
-			if cmd.Action == "lock" || cmd.Action == "unlock" {
+			if cmd.Action == "lobby-on" || cmd.Action == "lobby-off" {
 				room.mu.Lock()
-				room.locked = cmd.Action == "lock"
-				locked := room.locked
+				room.lobby = cmd.Action == "lobby-on"
+				lobby := room.lobby
 				room.mu.Unlock()
-				kind := "room-unlocked"
-				if locked {
-					kind = "room-locked"
-				}
+				kind := "lobby-off"
+				if lobby { kind = "lobby-on" }
 				room.mu.RLock()
-				roomPeers := make([]*Peer, 0, len(room.peers))
-				for _, p := range room.peers {
-					roomPeers = append(roomPeers, p)
-				}
+				for _, p := range room.peers { if !p.waiting { _ = send(p, Signal{Type: kind}) } }
 				room.mu.RUnlock()
-				for _, target := range roomPeers {
-					_ = send(target, Signal{Type: kind})
+				continue
+			}
+			if cmd.Action == "approve" || cmd.Action == "deny" {
+				target := findPeer(room, cmd.PeerID)
+				if target == nil { continue }
+				target.mu.Lock()
+				waiting := target.waiting
+				target.mu.Unlock()
+				if !waiting { continue }
+				if cmd.Action == "deny" {
+					_ = send(target, Signal{Type: "lobby-denied"})
+					removePeer(target)
+					continue
 				}
+				target.mu.Lock()
+				target.waiting = false
+				pendingOffer := target.pendingOffer
+				target.pendingOffer = nil
+				target.mu.Unlock()
+				room.mu.RLock()
+				active := make([]*Peer, 0)
+				approvedTracks := make([]*PublishedTrack, 0, len(room.tracks))
+				for id, p := range room.peers { if id != target.id && !p.waiting { active = append(active, p) } }
+				for _, t := range room.tracks { approvedTracks = append(approvedTracks, t) }
+				locked, lobby := room.locked, room.lobby
+				room.mu.RUnlock()
+				for _, t := range approvedTracks {
+					if sender, err := target.pc.AddTrack(t.local); err == nil {
+						target.mu.Lock(); target.subscriptions[t.ownerID+":"+t.trackID] = sender; target.mu.Unlock()
+						_ = send(target, Signal{Type: "track-published", PeerID: t.ownerID, Data: mustJSON(map[string]string{"trackId": t.trackID})})
+					}
+				}
+				b, _ := json.Marshal(map[string]any{"peers": peerIDs(active), "tracks": len(approvedTracks), "hostId": roomHostID(room), "locked": locked, "lobby": lobby})
+				_ = send(target, Signal{Type: "joined", RoomID: room.id, PeerID: target.id, Data: b})
+				for _, other := range active { _ = send(other, Signal{Type: "peer-joined", PeerID: target.id}) }
+				if pendingOffer != nil {
+					target.mu.Lock(); target.negotiating = true; target.mu.Unlock()
+					if target.pc.SetRemoteDescription(*pendingOffer) == nil {
+						flushPendingICE(target)
+						if answer, err := target.pc.CreateAnswer(nil); err == nil && target.pc.SetLocalDescription(answer) == nil {
+							data, _ := json.Marshal(target.pc.LocalDescription()); _ = send(target, Signal{Type: "answer", Data: data})
+						}
+					}
+					negotiationFinished(target)
+				}
+				continue
+			}
+			if cmd.Action == "lock" || cmd.Action == "unlock" {
+				room.mu.Lock(); room.locked = cmd.Action == "lock"; locked := room.locked; room.mu.Unlock()
+				kind := "room-unlocked"; if locked { kind = "room-locked" }
+				room.mu.RLock(); for _, target := range room.peers { _ = send(target, Signal{Type: kind}) }; room.mu.RUnlock()
 				continue
 			}
 			if (cmd.Action != "remove" && cmd.Action != "mute") || cmd.PeerID == "" || cmd.PeerID == me.id {
-				_ = send(me, Signal{Type: "error", Data: mustJSON(map[string]string{"code": "MODERATION_DENIED"})})
-				continue
+				_ = send(me, Signal{Type: "error", Data: mustJSON(map[string]string{"code": "MODERATION_DENIED"})}); continue
 			}
 			target := findPeer(room, cmd.PeerID)
 			if target != nil {
-				if cmd.Action == "mute" {
-					_ = send(target, Signal{Type: "muted", Data: mustJSON(map[string]string{"by": me.id})})
-				} else {
-					_ = send(target, Signal{Type: "removed", Data: mustJSON(map[string]string{"reason": "removed_by_host"})})
-					removePeer(target)
-				}
+				if cmd.Action == "mute" { _ = send(target, Signal{Type: "muted", Data: mustJSON(map[string]string{"by": me.id}) })
+				} else { _ = send(target, Signal{Type: "removed", Data: mustJSON(map[string]string{"reason": "removed_by_host"})}); removePeer(target) }
 			}
 		case "chat":
 			var chat ChatMessage
