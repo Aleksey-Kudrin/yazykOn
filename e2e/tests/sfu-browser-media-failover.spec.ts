@@ -158,6 +158,7 @@ test("browser WebRTC media survives SFU A loss and republishes on SFU B", async 
   expect(result.firstTrackId).toBeTruthy();
 
   const before = await redisStates();
+  expect(before.length).toBeGreaterThan(0);
   expect(before.some(track => track.peerId === result.peerId && track.kind === "video")).toBeTruthy();
   const oldSession = before.find(track => track.peerId === result.peerId && track.kind === "video")!.sessionId;
 
@@ -222,6 +223,7 @@ test("browser WebRTC media survives SFU A loss and republishes on SFU B", async 
 
   await page.waitForTimeout(1000);
   const after = await redisStates();
+  expect(after.length).toBeGreaterThan(0);
   const republished = after.find(track => track.peerId === result.peerId && track.kind === "video");
   expect(republished).toBeTruthy();
   expect(republished!.sessionId).not.toBe(oldSession);
