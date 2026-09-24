@@ -69,6 +69,9 @@ export function Room({ roomId }: RoomProps) {
   const iceRestarting = React.useRef(false);
   const iceRestartTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingIceRestart = React.useRef(false);
+  const makingOffer = React.useRef(false);
+  const ignoreOffer = React.useRef(false);
+  const lastRemoteDescription = React.useRef<string | null>(null);
   const reconnectTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttempt = React.useRef(0);
   const reconnecting = React.useRef(false);
@@ -179,6 +182,8 @@ export function Room({ roomId }: RoomProps) {
               if (stopped || generation !== connectionGeneration.current || peer.current !== pc) return;
               if (socket.current?.readyState !== WebSocket.OPEN) return;
               iceRestarting.current = true;
+              if (pc.signalingState !== "stable" || makingOffer.current) return;
+              makingOffer.current = true;
               void pc.createOffer({ iceRestart: true }).then(async offer => {
                 await pc.setLocalDescription(offer);
                 const ws = socket.current;
@@ -186,8 +191,10 @@ export function Room({ roomId }: RoomProps) {
                   ws.send(JSON.stringify({ type: "offer", roomId: sfuRoomId, data: pc.localDescription }));
                 } else {
                   iceRestarting.current = false;
+                  makingOffer.current = false;
                 }
               }).catch(error => {
+                makingOffer.current = false;
                 iceRestarting.current = false;
                 console.warn("ICE restart failed", error);
                 if (!stopped && generation === connectionGeneration.current) setStatus("WebRTC: ICE не удалось восстановить");
@@ -203,15 +210,21 @@ export function Room({ roomId }: RoomProps) {
           } else if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
             setStatus("WebRTC: восстанавливаем соединение…");
             if (!pendingIceRestart.current && !iceRestarting.current && socket.current?.readyState === WebSocket.OPEN) {
+              if (pc.signalingState !== "stable" || makingOffer.current) return;
               iceRestarting.current = true;
+              makingOffer.current = true;
               void pc.createOffer({ iceRestart: true }).then(async offer => {
                 await pc.setLocalDescription(offer);
                 const ws = socket.current;
                 if (ws?.readyState === WebSocket.OPEN) {
                   ws.send(JSON.stringify({ type: "offer", roomId: sfuRoomId, data: pc.localDescription }));
+                } else {
+                  iceRestarting.current = false;
+                  makingOffer.current = false;
                 }
               }).catch(error => {
                 iceRestarting.current = false;
+                makingOffer.current = false;
                 console.warn("ICE restart failed", error);
                 setStatus("WebRTC: соединение не установлено");
               });
@@ -235,9 +248,12 @@ export function Room({ roomId }: RoomProps) {
           }
           pendingLocalIce.current = [];
           try {
+            if (pc.signalingState !== "stable" || makingOffer.current) return;
+            makingOffer.current = true;
             const offer = await pc.createOffer();
             await pc.setLocalDescription(offer);
             ws.send(JSON.stringify({ type: "offer", roomId: sfuRoomId, data: pc.localDescription }));
+            makingOffer.current = false;
           } catch (error) {
             console.error("initial WebRTC offer failed", error);
             setStatus("Не удалось начать WebRTC-соединение");
@@ -345,6 +361,7 @@ export function Room({ roomId }: RoomProps) {
             return;
           }
           if (message.type === "answer") {
+            if (pc.signalingState !== "have-local-offer") return;
             try {
               await pc.setRemoteDescription(message.data);
             } catch (error) {
@@ -354,18 +371,28 @@ export function Room({ roomId }: RoomProps) {
               ws.close();
               return;
             }
+            makingOffer.current = false;
             for (const candidate of pendingIce.current) await pc.addIceCandidate(candidate);
             pendingIce.current = [];
             return;
           }
           if (message.type === "offer") {
+            const descriptionKey = JSON.stringify(message.data);
+            if (lastRemoteDescription.current === descriptionKey) return;
+            if (pc.signalingState !== "stable") {
+              ignoreOffer.current = true;
+              return;
+            }
+            ignoreOffer.current = false;
             try {
               await pc.setRemoteDescription(message.data);
+              lastRemoteDescription.current = descriptionKey;
             } catch (error) {
               console.warn("failed to apply remote offer", error);
               setStatus("WebRTC: предложение сигнализации отклонено");
               return;
             }
+            if (pc.signalingState !== "have-remote-offer") return;
             const answer = await pc.createAnswer();
             await pc.setLocalDescription(answer);
             ws.send(JSON.stringify({ type: "answer", roomId: sfuRoomId, data: pc.localDescription }));
