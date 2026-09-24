@@ -95,3 +95,17 @@ func TestNewID(t *testing.T) {
 		t.Fatal("generated peer IDs are identical")
 	}
 }
+func TestRoomLockState(t *testing.T) {
+	room := &Room{id: "locked-room", peers: make(map[string]*Peer), tracks: make(map[string]*PublishedTrack)}
+	room.hostID = "host"
+	if room.locked {
+		t.Fatal("new room should be unlocked")
+	}
+	room.locked = true
+	if !room.locked {
+		t.Fatal("room should be locked")
+	}
+	if got := room.hostID; got != "host" {
+		t.Fatalf("host id = %q, want host", got)
+	}
+}
