@@ -4,7 +4,7 @@ import { accessRoom, getRoom, getRoomMembers, setRoomMemberRole, type RoomMember
 interface RoomProps { roomId: string; }
 type Participant = { peerId: string; userId?: string; role?: string };
 type SignalMessage =
-  | { type: "joined"; roomId: string; peerId: string; data?: { peers: string[]; tracks?: number; hostId?: string; locked?: boolean; lobby?: boolean } }
+  | { type: "joined"; roomId: string; peerId: string; data?: { peers: string[]; peerMeta?: Record<string, { userId?: string; role?: string }>; tracks?: number; hostId?: string; locked?: boolean; lobby?: boolean } }
   | { type: "peer-joined"; peerId: string; data?: { userId?: string; role?: string } }
   | { type: "peer-left"; peerId: string }
   | { type: "track-published"; peerId: string; data?: { trackId?: string } }
@@ -158,7 +158,7 @@ export function Room({ roomId }: RoomProps) {
           if (message.type === "joined") {
             const data = message.data;
             setSelfId(message.peerId);
-            setParticipants([ { peerId: message.peerId }, ...(data?.peers ?? []).map(peerId => ({ peerId })) ]);
+            setParticipants([ { peerId: message.peerId }, ...(data?.peers ?? []).map(peerId => ({ peerId, ...data?.peerMeta?.[peerId] })) ]);
             setHostId(data?.hostId ?? message.peerId);
             setRoomLocked(Boolean(data?.locked));
             setLobby(Boolean(data?.lobby));
