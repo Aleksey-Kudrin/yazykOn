@@ -59,3 +59,17 @@ export async function login(username: string, password: string): Promise<User> {
   return data;
 }
 export async function logout(): Promise<void> { await fetch(\`${API_URL}\` + "/api/auth/logout", { method: "POST", credentials: "include" }); }
+
+export interface RoomMember { id: string; username: string; role: "host" | "cohost" | "member"; created_at: string; }
+export async function getRoomMembers(id: string): Promise<RoomMember[]> {
+  const response = await fetch(`${API_URL}/api/rooms/${encodeURIComponent(id)}/members`, { credentials: "include" });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error ?? "Не удалось получить участников");
+  return data.members ?? [];
+}
+export async function setRoomMemberRole(roomId: string, userId: string, role: "cohost" | "member"): Promise<void> {
+  const response = await fetch(`${API_URL}/api/rooms/${encodeURIComponent(roomId)}/members/${encodeURIComponent(userId)}`, {
+    method: "PATCH", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role })
+  });
+  if (!response.ok) throw new Error("Не удалось изменить роль");
+}
