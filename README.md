@@ -26,7 +26,7 @@ Browser / Desktop / Android
 - Signaling: WebSocket
 - Reverse proxy: Nginx
 - Deployment: Docker Compose on Proxmox LXC
-- PostgreSQL-backed users, sessions, rooms, memberships and persistent roles
+- PostgreSQL-backed users, sessions, rooms, memberships, persistent roles and room chat history
 - HMAC-signed room access tokens shared by API and SFU
 - Redis: planned
 - coturn
@@ -86,7 +86,7 @@ For the Docker deployment, the web application uses `/media` as the SFU WebSocke
 
 языкOn is considered release-ready when the following are implemented and verified:
 
-1. SFU/WebRTC negotiation, track lifecycle, ICE/TURN and disconnect recovery are covered by automated tests.
+1. SFU/WebRTC negotiation, track lifecycle, ICE/TURN, room capacity and disconnect recovery are covered by automated tests.
 2. Authentication, persistent rooms/memberships/roles, authorization, rate limits, origin restrictions and audit-safe error handling are production-hardened.
 3. Meeting UX includes participant management, chat, screen sharing, lobby, room locking and reliable reconnect behavior.
 4. Persistent chat/history, presence and multi-instance coordination are implemented.
