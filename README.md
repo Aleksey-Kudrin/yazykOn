@@ -1,48 +1,95 @@
 # языкOn
 
-Self-hosted video conferencing platform — a Zoom-like system for Proxmox.
+Self-hosted video conferencing platform for Proxmox.
 
-## Project
+## Architecture
 
-**Name:** языкOn  
-**Repository:** `Aleksey-Kudrin/yazykOn`
+языкOn is built without Jitsi. The project uses native WebRTC and a custom signaling layer. A custom SFU is the next media milestone.
+
+```
+Browser / Desktop / Android
+          |
+       WebRTC
+          |
+   языкOn Signaling
+          |
+      Custom SFU
+          |
+       RTP/RTCP
+```
 
 ## Stack
 
 - Web: TypeScript + React
-- Backend: TypeScript + Node.js
+- Signaling/API: Node.js + TypeScript + Express + WebSocket
+- Media: native WebRTC
+- SFU: custom, planned
 - Desktop: Electron + TypeScript
 - Android: Kotlin
-- Media: Jitsi Videobridge / WebRTC
-- TURN: coturn
-- Database: PostgreSQL
-- Cache/presence: Redis
-- Reverse proxy: Nginx
+- Database: PostgreSQL, planned
+- Cache/presence: Redis, planned
+- TURN: coturn, planned
+- Reverse proxy: Nginx, planned
 - Deployment: Docker Compose on Proxmox LXC
 
-## Planned clients
+## Current milestone
 
-- Browser
-- Windows
-- Android
+The web client now has a native WebRTC 1-to-1 call:
 
-## Initial goals
+- room creation;
+- WebSocket signaling;
+- camera and microphone;
+- local and remote video;
+- mute/unmute;
+- camera on/off;
+- ICE candidate exchange;
+- WebRTC offer/answer.
 
-- Video and audio calls
-- Multi-user conference rooms
+There is no Jitsi dependency.
+
+Rooms and signaling are currently in memory. The next milestone is a custom SFU for multi-user conferences.
+
+## Development
+
+### Server
+
+```bash
+cd server
+npm install
+npm run dev
+```
+
+### Web
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+Set `VITE_API_URL` when the API is hosted separately.
+
+## Planned features
+
+- Custom SFU
+- Multi-user conferences
 - Screen sharing
 - Participant list
 - Text chat
 - Room passwords
 - Lobby
 - Authentication
-- Russian UI with internationalization support
-- Self-hosted deployment
+- PostgreSQL persistence
+- Redis presence
+- TURN
+- Windows desktop client
+- Android client
+- Russian UI with internationalization
 
 ## Repository structure
 
-```text
-server/       Backend API
+```
+server/       API + WebSocket signaling
 web/          Browser client
 desktop/      Windows client
 android/      Android client
@@ -50,10 +97,6 @@ deploy/       Proxmox/Docker deployment
 docs/         Architecture and API documentation
 .github/      CI/CD
 ```
-
-## Development
-
-The project is being developed incrementally, starting with the server foundation and web client.
 
 ## License
 
