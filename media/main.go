@@ -751,6 +751,9 @@ func replacePeerSession(old *Peer, room *Room) {
 	}
 	room.mu.Unlock()
 
+	for _, track := range removedTrackStates {
+		clusterRemoveTrackState(p.room.id, track.ownerID, track.trackID, track.sessionID)
+	}
 	for _, other := range remaining {
 		for _, publishedID := range removedTracks {
 			if removeSubscription(other, publishedID) {
@@ -1218,9 +1221,11 @@ func removePeer(p *Peer) {
 	delete(p.room.peers, p.id)
 	activePeers.Add(-1)
 	removedTracks := make([]string, 0)
+	removedTrackStates := make([]PublishedTrack, 0)
 	for id, t := range p.room.tracks {
 		if t.ownerID == p.id {
 			removedTracks = append(removedTracks, id)
+			removedTrackStates = append(removedTrackStates, *t)
 			delete(p.room.tracks, id)
 		}
 	}
