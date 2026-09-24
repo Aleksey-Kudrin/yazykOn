@@ -61,6 +61,22 @@ jobs:
           name: yazykon-sfu-failover-${{ github.run_id }}
           path: e2e/artifacts
           if-no-files-found: warn
+      - name: Collect failover artifacts
+        if: always()
+        working-directory: .
+        run: |
+          mkdir -p e2e/artifacts
+          docker compose -p yazykon-sfu-it -f e2e/docker-compose.sfu-failover.yml ps > e2e/artifacts/compose-ps.txt || true
+          docker compose -p yazykon-sfu-it -f e2e/docker-compose.sfu-failover.yml logs --no-color > e2e/artifacts/sfu.log || true
+          curl -fsS http://127.0.0.1:4100/metrics > e2e/artifacts/primary-metrics.txt || true
+          curl -fsS http://127.0.0.1:4200/metrics > e2e/artifacts/secondary-metrics.txt || true
+      - name: Upload failover artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yazykon-sfu-failover-${{ github.run_id }}
+          path: e2e/artifacts
+          if-no-files-found: warn
       - name: Cleanup
         if: always()
         working-directory: .
