@@ -448,13 +448,17 @@ export function Room({ roomId }: RoomProps) {
 
   function toggleLobby() { moderate(lobby ? "lobby-off" : "lobby-on"); }
 
-  React.useEffect(() => { if (hostId === selfId) { void refreshMembers(); void refreshBreakouts(); } }, [hostId, selfId, roomId]);
+  React.useEffect(() => { if (hostId === selfId) void refreshMembers(); }, [hostId, selfId, roomId]);
 
   React.useEffect(() => {
-    if (sfuRoomId !== roomId || hostId !== selfId) return;
+    if (sfuRoomId !== roomId) return;
+    void refreshBreakouts();
     const timer = window.setInterval(() => { void refreshBreakouts(); }, 3000);
     return () => window.clearInterval(timer);
-  }, [sfuRoomId, roomId, hostId, selfId]);
+  }, [sfuRoomId, roomId]);
+
+  const selfUserId = participants.find(participant => participant.peerId === selfId)?.userId;
+  const assignedBreakout = selfUserId ? breakouts.find(breakout => breakout.participants.includes(selfUserId)) : undefined;
 
   function approveWaiting(peerId: string) { setWaitingPeers(current => current.filter(id => id !== peerId)); moderate("approve", peerId); }
   function denyWaiting(peerId: string) { setWaitingPeers(current => current.filter(id => id !== peerId)); moderate("deny", peerId); }
@@ -490,6 +494,10 @@ export function Room({ roomId }: RoomProps) {
       {!remotes.length && <div className="video-tile remote"><span>Ожидание участников</span></div>}
     </section>
     <div className="meeting-status">{status} {connected ? "• online" : ""}</div>
+    {sfuRoomId === roomId && assignedBreakout && <aside className="breakout-assigned">
+      <strong>Вам назначена breakout-комната: {assignedBreakout.name}</strong>
+      <button type="button" onClick={() => void enterBreakout(assignedBreakout.id)} disabled={breakoutBusy}>Перейти</button>
+    </aside>}
     {hostId === selfId && sfuRoomId === roomId && <aside className="breakouts">
       <strong>Breakout-комнаты</strong>
       <form onSubmit={event => { event.preventDefault(); void createBreakout(); }} className="participant-controls">
