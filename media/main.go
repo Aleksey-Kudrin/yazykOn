@@ -313,7 +313,9 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		_ = send(me, Signal{Type: "lobby-waiting", RoomID: room.id, PeerID: id})
 		if host := findPeer(room, hostID); host != nil { _ = send(host, Signal{Type: "lobby-join", PeerID: id}) }
 	} else {
-		b, _ := json.Marshal(map[string]any{"peers": peerIDs(others), "tracks": len(tracks), "hostId": hostID, "locked": locked, "lobby": lobby})
+		peerMeta := make(map[string]map[string]string, len(others))
+		for _, p := range others { peerMeta[p.id] = map[string]string{"userId": p.userID, "role": p.role} }
+		b, _ := json.Marshal(map[string]any{"peers": peerIDs(others), "peerMeta": peerMeta, "tracks": len(tracks), "hostId": hostID, "locked": locked, "lobby": lobby})
 		_ = send(me, Signal{Type: "joined", RoomID: room.id, PeerID: id, Data: b})
 		for _, other := range others { _ = send(other, Signal{Type: "peer-joined", PeerID: id, Data: mustJSON(map[string]string{"userId": me.userID, "role": me.role})}) }
 	}
