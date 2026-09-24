@@ -108,6 +108,8 @@ var (
 	mediaConnByIP = map[string]int{}
 	activePeers atomic.Int64
 	activeRooms atomic.Int64
+	failoverClaims atomic.Int64
+	failoverOwnerRedirects atomic.Int64
 	upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
 		if origin == "" { return true }
@@ -277,6 +279,7 @@ func clusterClaimRoom(roomID string) (bool, string) {
 		return false, ""
 	}
 	if claimed {
+		failoverClaims.Add(1)
 		return true, ""
 	}
 	current, err := client.Get(ctx, key).Result()
@@ -286,6 +289,9 @@ func clusterClaimRoom(roomID string) (bool, string) {
 	var owner struct { NodeID string `json:"nodeId"`; Endpoint string `json:"endpoint"` }
 	if json.Unmarshal([]byte(current), &owner) != nil {
 		return false, ""
+	}
+	if owner.NodeID != nodeID {
+		failoverOwnerRedirects.Add(1)
 	}
 	return owner.NodeID == nodeID, owner.Endpoint
 }
@@ -621,6 +627,8 @@ func main() {
     _, _ = w.Write([]byte(
       "yazykon_media_active_peers " + strconv.FormatInt(activePeers.Load(), 10) + "\n" +
       "yazykon_media_active_rooms " + strconv.FormatInt(activeRooms.Load(), 10) + "\n" +
+      "yazykon_media_failover_claims_total " + strconv.FormatInt(failoverClaims.Load(), 10) + "\n" +
+      "yazykon_media_owner_redirects_total " + strconv.FormatInt(failoverOwnerRedirects.Load(), 10) + "\n" +
       "yazykon_media_goroutines " + strconv.Itoa(runtime.NumGoroutine()) + "\n" +
       "yazykon_media_heap_bytes " + strconv.FormatUint(mem.HeapAlloc, 10) + "\n" +
       "yazykon_media_alloc_bytes_total " + strconv.FormatUint(mem.TotalAlloc, 10) + "\n" +
