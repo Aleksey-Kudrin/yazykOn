@@ -55,6 +55,7 @@ type Peer struct {
 type Room struct {
 	id     string
 	hostID string
+	locked bool
 	mu     sync.RWMutex
 	peers  map[string]*Peer
 	tracks map[string]*PublishedTrack
@@ -158,6 +159,12 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		room.hostID = id
 	}
 	hostID := room.hostID
+	if room.locked && id != hostID {
+		room.mu.Unlock()
+		_ = conn.WriteJSON(Signal{Type: "error", Data: mustJSON(map[string]string{"code": "ROOM_LOCKED"})})
+		_ = pc.Close()
+		return
+	}
 	room.mu.Unlock()
 	me := &Peer{id: id, room: room, conn: conn, pc: pc, published: make(map[string]*webrtc.TrackLocalStaticRTP), subscriptions: make(map[string]*webrtc.RTPSender)}
 
@@ -301,10 +308,34 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 		case "moderate":
 			var cmd ModerationCommand
-			if json.Unmarshal(msg.Data, &cmd) != nil || cmd.Action == "" || cmd.PeerID == "" {
+			if json.Unmarshal(msg.Data, &cmd) != nil || cmd.Action == "" {
 				continue
 			}
-			if (cmd.Action != "remove" && cmd.Action != "mute") || me.id != roomHostID(room) || cmd.PeerID == me.id {
+			if me.id != roomHostID(room) {
+				_ = send(me, Signal{Type: "error", Data: mustJSON(map[string]string{"code": "MODERATION_DENIED"})})
+				continue
+			}
+			if cmd.Action == "lock" || cmd.Action == "unlock" {
+				room.mu.Lock()
+				room.locked = cmd.Action == "lock"
+				locked := room.locked
+				room.mu.Unlock()
+				kind := "room-unlocked"
+				if locked {
+					kind = "room-locked"
+				}
+				room.mu.RLock()
+				roomPeers := make([]*Peer, 0, len(room.peers))
+				for _, p := range room.peers {
+					roomPeers = append(roomPeers, p)
+				}
+				room.mu.RUnlock()
+				for _, target := range roomPeers {
+					_ = send(target, Signal{Type: kind})
+				}
+				continue
+			}
+			if (cmd.Action != "remove" && cmd.Action != "mute") || cmd.PeerID == "" || cmd.PeerID == me.id {
 				_ = send(me, Signal{Type: "error", Data: mustJSON(map[string]string{"code": "MODERATION_DENIED"})})
 				continue
 			}
