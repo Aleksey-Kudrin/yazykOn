@@ -134,6 +134,18 @@ async function currentUser(req: express.Request) {
 function requireScrypt(password: string, salt: string) { return scryptSync(password, salt, 32).toString("hex"); }
 function verifyScrypt(password: string, stored: string) { const [salt, expectedHex] = stored.split(":"); if (!salt || !expectedHex) return false; const actual=Buffer.from(requireScrypt(password,salt),"hex"); const expected=Buffer.from(expectedHex,"hex"); return actual.length===expected.length && timingSafeEqual(actual,expected); }
 
+async function writeAuditEvent(input: { userId?: string | null; roomId?: string | null; action: string; targetUserId?: string | null; ip?: string | null }) {
+  if (!db) return;
+  try {
+    await db.query(
+      "INSERT INTO audit_events(id,user_id,room_id,action,target_user_id,ip) VALUES($1,$2,$3,$4,$5,$6)",
+      [randomUUID(), input.userId ?? null, input.roomId ?? null, input.action, input.targetUserId ?? null, input.ip ?? null]
+    );
+  } catch (error) {
+    console.error("audit write failed", error);
+  }
+}
+
 function issueRoomAccessToken(roomId: string, userId: string, role: RoomRole): string | null {
   if (!roomAccessSecret) return null;
   const expires = Math.floor(Date.now() / 1000) + roomAccessTtl;
@@ -209,6 +221,7 @@ app.post("/api/auth/register", async (req, res) => {
     const sessionId = randomUUID();
     await db.query("INSERT INTO sessions(id,user_id,expires_at) VALUES($1,$2,now()+interval '7 days')", [sessionId,userId]);
     res.setHeader("Set-Cookie", authCookie(sessionId));
+    void writeAuditEvent({ userId, action: "auth.register", ip: requestIp(req) });
     res.status(201).json({ id:userId, username });
   } catch {
     res.status(409).json({ error: "USERNAME_TAKEN" });
@@ -225,6 +238,7 @@ app.post("/api/auth/login", async (req, res) => {
   const sessionId = randomUUID();
   await db.query("INSERT INTO sessions(id,user_id,expires_at) VALUES($1,$2,now()+interval '7 days')", [sessionId,row.id]);
   res.setHeader("Set-Cookie", authCookie(sessionId));
+  void writeAuditEvent({ userId: row.id, action: "auth.login", ip: requestIp(req) });
   res.json({ id:row.id, username:row.username });
 });
 
@@ -232,6 +246,7 @@ app.post("/api/auth/logout", async (req, res) => {
   if (db) { const id=readSessionId(req); if(id) await db.query("DELETE FROM sessions WHERE id=$1",[id]); }
   const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
   res.setHeader("Set-Cookie",`yazykon_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0${secure}`);
+  void writeAuditEvent({ userId: null, action: "auth.logout", ip: requestIp(req) });
   res.status(204).end();
 });
 
@@ -268,6 +283,7 @@ app.post("/api/rooms", async (req, res) => {
       await client.query("COMMIT");
       const row = result.rows[0];
       const room = { id: row.id, name: row.name, createdAt: new Date(row.created_at).toISOString(), requiresPassword: Boolean(row.password_hash && row.password_salt) };
+      void writeAuditEvent({ userId: user.id, roomId: id, action: "room.create", ip: requestIp(req) });
       res.status(201).json({ ...room, accessToken: issueRoomAccessToken(id, user.id, "host"), role: "host" });
       return;
     } catch (error: unknown) {
@@ -308,6 +324,7 @@ app.post("/api/rooms/:id/access", async (req, res) => {
   if (!member.rows[0]) {
     await db.query("INSERT INTO room_members(room_id,user_id,role) VALUES($1,$2,$3)", [room.id, user.id, role]);
   }
+  void writeAuditEvent({ userId: user.id, roomId: room.id, action: "room.access", ip: requestIp(req) });
   res.json({ accessToken: issueRoomAccessToken(room.id, user.id, role), role });
 });
 
@@ -320,6 +337,7 @@ app.post("/api/rooms/:id/token", async (req, res) => {
   const member = await db.query("SELECT role FROM room_members WHERE room_id=$1 AND user_id=$2", [roomId, user.id]);
   if (!member.rows[0]) { res.status(403).json({ error: "ROOM_MEMBERSHIP_REQUIRED" }); return; }
   const role = member.rows[0].role as RoomRole;
+  void writeAuditEvent({ userId: user.id, roomId, action: "room.token.refresh", ip: requestIp(req) });
   res.json({ accessToken: issueRoomAccessToken(roomId, user.id, role), role });
 });
 
