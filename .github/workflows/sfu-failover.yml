@@ -97,6 +97,7 @@ jobs:
           test -f e2e/artifacts/sfu-redis-outage-report.json || true
           test -f e2e/artifacts/sfu-redis-cleanup-report.json || true
           test -f e2e/artifacts/sfu-churn-leak-report.json || true
+          test -f e2e/artifacts/sfu-churn-leak-report.json || true
       - name: Upload failover artifacts
         if: always()
         uses: actions/upload-artifact@v4
