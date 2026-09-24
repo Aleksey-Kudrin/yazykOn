@@ -73,3 +73,30 @@ export async function setRoomMemberRole(roomId: string, userId: string, role: "c
   });
   if (!response.ok) throw new Error("Не удалось изменить роль");
 }
+
+export interface RoomMessage {
+  id: string;
+  userId: string;
+  username: string;
+  text: string;
+  timestamp: number;
+}
+
+export async function getRoomMessages(id: string): Promise<RoomMessage[]> {
+  const response = await fetch(`${API_URL}/api/rooms/${encodeURIComponent(id)}/messages`, { credentials: "include" });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error ?? "Не удалось получить историю чата");
+  return data.messages ?? [];
+}
+
+export async function sendRoomMessage(id: string, text: string): Promise<RoomMessage> {
+  const response = await fetch(`${API_URL}/api/rooms/${encodeURIComponent(id)}/messages`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error ?? "Не удалось отправить сообщение");
+  return data;
+}
