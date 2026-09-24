@@ -104,7 +104,6 @@ services:
       - server
       - media
       - turn
-      - redis
     expose:
       - "80"
     volumes:
