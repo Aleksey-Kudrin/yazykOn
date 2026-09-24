@@ -1,10 +1,10 @@
 import React from "react";
 import { MeetingFeatureControls } from "./MeetingFeatures";
 import { participantFromMeta, removeParticipant, upsertParticipant, type Participant } from "./participantModel";
+import { appendChatMessage, mergeChatMessages, type ChatMessage } from "./chatModel";
 import { accessRoom, getRoom, getRoomMembers, getRoomMessages, sendRoomMessage, setRoomMemberRole, getBreakoutRooms, createBreakoutRoom, assignBreakoutParticipant, removeBreakoutParticipant, deleteBreakoutRoom, joinBreakoutRoom, refreshRoomAccessToken, type BreakoutRoom, type RoomMember } from "./api";
 
 interface RoomProps { roomId: string; }
-type ChatMessage = { id?: string; userId?: string; username?: string; peerId?: string; text: string; timestamp: number };
 type SignalMessage =
   | { type: "joined"; roomId: string; peerId: string; data?: { peers: string[]; peerMeta?: Record<string, { userId?: string; role?: string }>; tracks?: number; hostId?: string; locked?: boolean; lobby?: boolean } }
   | { type: "peer-joined"; peerId: string; data?: { userId?: string; role?: string } }
@@ -90,7 +90,7 @@ export function Room({ roomId }: RoomProps) {
     async function start() {
       try {
         const room = await getRoom(roomId);
-        try { setChat(await getRoomMessages(roomId)); } catch (error) { console.warn("chat history unavailable", error); }
+        try { setChat(current => mergeChatMessages(current, await getRoomMessages(roomId))); } catch (error) { console.warn("chat history unavailable", error); }
         let accessToken = sfuAccessToken ?? sessionStorage.getItem("yazykon-access-" + sfuRoomId);
         if (sfuRoomId === roomId && accessToken) {
           try {
@@ -358,7 +358,7 @@ export function Room({ roomId }: RoomProps) {
           if (message.type === "chat") {
             const data = message.data ?? {};
             const text = data.text;
-            if (text) setChat(current => current.some(item => item.id === data.id) ? current : [...current.slice(-99), { id: data.id, userId: data.userId, username: data.username, peerId: message.peerId, text, timestamp: data.timestamp ?? Date.now() }]);
+            if (text) setChat(current => appendChatMessage(current, { id: data.id, userId: data.userId, username: data.username, peerId: message.peerId, text, timestamp: data.timestamp ?? Date.now() }));
             return;
           }
           if (message.type === "answer") {
@@ -602,7 +602,7 @@ export function Room({ roomId }: RoomProps) {
     }
     try {
       const message = await sendRoomMessage(roomId, text);
-      setChat(current => current.some(item => item.id === message.id) ? current : [...current.slice(-99), message]);
+      setChat(current => appendChatMessage(current, message));
       setChatText("");
     } catch (error) {
       setStatus("Не удалось отправить сообщение");
