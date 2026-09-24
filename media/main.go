@@ -304,14 +304,18 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 			if json.Unmarshal(msg.Data, &cmd) != nil || cmd.Action == "" || cmd.PeerID == "" {
 				continue
 			}
-			if cmd.Action != "remove" || me.id != roomHostID(room) || cmd.PeerID == me.id {
+			if (cmd.Action != "remove" && cmd.Action != "mute") || me.id != roomHostID(room) || cmd.PeerID == me.id {
 				_ = send(me, Signal{Type: "error", Data: mustJSON(map[string]string{"code": "MODERATION_DENIED"})})
 				continue
 			}
 			target := findPeer(room, cmd.PeerID)
 			if target != nil {
-				_ = send(target, Signal{Type: "removed", Data: mustJSON(map[string]string{"reason": "removed_by_host"})})
-				removePeer(target)
+				if cmd.Action == "mute" {
+					_ = send(target, Signal{Type: "muted", Data: mustJSON(map[string]string{"by": me.id})})
+				} else {
+					_ = send(target, Signal{Type: "removed", Data: mustJSON(map[string]string{"reason": "removed_by_host"})})
+					removePeer(target)
+				}
 			}
 		case "chat":
 			var chat ChatMessage
