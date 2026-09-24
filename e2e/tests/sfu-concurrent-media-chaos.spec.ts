@@ -130,7 +130,11 @@ test("concurrent rooms survive simultaneous SFU outage and reconnect", async ({ 
   await health(primary); await health(secondary);
 
   const rooms = Array.from({ length: roomCount }, (_, i) => "CONCURRENT-CHAOS-" + (i + 1));
-  const pages = await Promise.all(Array.from({ length: roomCount * members }, () => browser.newPage({ permissions: ["camera", "microphone"] })));
+  const pages = await Promise.all(Array.from({ length: roomCount * members }, async () => {
+    const page = await browser.newPage({ permissions: ["camera", "microphone"] });
+    await page.goto(primary + "/health");
+    return page;
+  }));
   const at = (room: number, member: number) => pages[room * members + member];
   const ids = new Map<string, string>();
   const tracks = new Map<string, string[]>();
