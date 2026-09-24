@@ -256,7 +256,7 @@ app.post("/api/auth/register", async (req, res) => {
     const userId = randomUUID();
     await db.query("INSERT INTO users(id, username, password_hash) VALUES($1,$2,$3)", [userId, username, hash]);
     const sessionId = randomUUID();
-    await db.query("INSERT INTO sessions(id,user_id,expires_at) VALUES($1,$2,now()+($3 * interval '1 second'))", [sessionId,userId]);
+    await db.query("INSERT INTO sessions(id,user_id,expires_at) VALUES($1,$2,now()+($3 * interval '1 second'))", [sessionId,userId,SESSION_TTL_SECONDS]);
     res.setHeader("Set-Cookie", authCookie(sessionId));
     void writeAuditEvent({ userId, action: "auth.register", ip: requestIp(req) });
     res.status(201).json({ id:userId, username });
@@ -277,7 +277,7 @@ app.post("/api/auth/login", async (req, res) => {
     await db.query("UPDATE users SET password_hash=$1 WHERE id=$2", [hashPassword(password), row.id]);
   }
   const sessionId = randomUUID();
-  await db.query("INSERT INTO sessions(id,user_id,expires_at) VALUES($1,$2,now()+interval '7 days')", [sessionId,row.id]);
+  await db.query("INSERT INTO sessions(id,user_id,expires_at) VALUES($1,$2,now()+($3 * interval '1 second'))", [sessionId,row.id,SESSION_TTL_SECONDS]);
   res.setHeader("Set-Cookie", authCookie(sessionId));
   void writeAuditEvent({ userId: row.id, action: "auth.login", ip: requestIp(req) });
   res.json({ id:row.id, username:row.username });
