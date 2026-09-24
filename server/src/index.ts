@@ -6,6 +6,7 @@ import { createServer } from "node:http";
 import { Pool } from "pg";
 import { attachSignaling } from "./signaling.js";
 import { closeRedis, getRedis, redisEnabled } from "./redis.js";
+import { NewManager } from "./breakout/manager.js";
 
 type RoomRole = "host" | "cohost" | "member";
 
@@ -25,6 +26,7 @@ const allowedOrigins = new Set(
 );
 const authRate = new Map<string, { count: number; resetAt: number }>();
 const roomRate = new Map<string, { count: number; resetAt: number }>();
+const breakoutManager = NewManager();
 
 function requestIp(req: express.Request) {
   return req.socket.remoteAddress ?? "unknown";
@@ -364,6 +366,31 @@ app.post("/api/rooms/:id/messages", async (req, res) => {
     } catch (error) { console.error("media chat sync failed", error); }
   }
   res.status(201).json({ id: row.id, userId: row.user_id, username: user.username, text: row.text, timestamp: new Date(row.created_at).getTime() });
+});
+
+app.post("/api/rooms/:id/breakouts", async (req, res) => {
+  if (!db) { res.status(503).json({ error: "DATABASE_NOT_CONFIGURED" }); return; }
+  const user = await currentUser(req);
+  if (!user) { res.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+  const roomId = req.params.id.toUpperCase();
+  const owner = await db.query("SELECT owner_id FROM rooms WHERE id=$1", [roomId]);
+  if (!owner.rows[0]) { res.status(404).json({ error: "ROOM_NOT_FOUND" }); return; }
+  if (owner.rows[0].owner_id !== user.id) { res.status(403).json({ error: "OWNER_REQUIRED" }); return; }
+  const name = typeof req.body?.name === "string" ? req.body.name.trim().slice(0, 100) : "";
+  if (!name) { res.status(400).json({ error: "INVALID_BREAKOUT_NAME" }); return; }
+  const id = randomBytes(5).toString("base64url").slice(0, 8).toUpperCase();
+  const breakout = breakoutManager.create(id, name);
+  res.status(201).json({ id: breakout.id, name: breakout.name, participants: [] });
+});
+
+app.get("/api/rooms/:id/breakouts", async (req, res) => {
+  if (!db) { res.status(503).json({ error: "DATABASE_NOT_CONFIGURED" }); return; }
+  const user = await currentUser(req);
+  if (!user) { res.status(401).json({ error: "AUTH_REQUIRED" }); return; }
+  const roomId = req.params.id.toUpperCase();
+  const member = await db.query("SELECT 1 FROM room_members WHERE room_id=$1 AND user_id=$2", [roomId, user.id]);
+  if (!member.rows[0]) { res.status(403).json({ error: "ROOM_MEMBERSHIP_REQUIRED" }); return; }
+  res.json({ rooms: breakoutManager.list().map(r => ({ id: r.id, name: r.name, participants: Object.keys(r.participants) })) });
 });
 
 app.get("/api/rooms/:id/membership", async (req, res) => {
