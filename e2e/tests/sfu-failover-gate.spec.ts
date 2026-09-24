@@ -34,17 +34,23 @@ test("SFU failover reports consolidate into a machine-readable gate", async () =
 
   const missing = files.filter(file => reports[file] === null);
   const failed = files.filter(file => reports[file] !== null && reports[file].pass === false);
+  const invalid = files.filter(file => {
+    const report = reports[file];
+    return report !== null && typeof report.pass !== "boolean";
+  });
 
   const summary = {
     generatedAt: new Date().toISOString(),
     artifactDir,
     reports: Object.fromEntries(files.map(file => [file, {
       present: reports[file] !== null,
-      pass: reports[file]?.pass ?? null
+      pass: reports[file]?.pass ?? null,
+      generatedAt: reports[file]?.generatedAt ?? null
     }])),
     missing,
     failed,
-    pass: missing.length === 0 && failed.length === 0
+    invalid,
+    pass: missing.length === 0 && failed.length === 0 && invalid.length === 0
   };
 
   fs.mkdirSync(artifactDir, { recursive: true });
@@ -64,6 +70,16 @@ test("SFU failover reports consolidate into a machine-readable gate", async () =
       "",
       `- Missing reports: ${missing.length}`,
       `- Failed reports: ${failed.length}`,
+      `- Invalid reports: ${invalid.length}`,
+      "",
+      "| Report | Present | Pass | Generated |",
+      "| --- | --- | --- | --- |",
+      ...files.map(file => {
+        const report = reports[file];
+        const pass = report?.pass === true ? "yes" : report?.pass === false ? "no" : "n/a";
+        return `| ${file} | ${report ? "yes" : "no"} | ${pass} | ${report?.generatedAt ?? "n/a"} |`;
+      }),
+      "",
       `- Gate: ${summary.pass ? "PASS" : "FAIL"}`,
       ""
     ].join("\n")
@@ -71,4 +87,5 @@ test("SFU failover reports consolidate into a machine-readable gate", async () =
 
   expect(missing, "all failover reports must exist").toEqual([]);
   expect(failed, "all failover reports must pass").toEqual([]);
+  expect(invalid, "all failover reports must expose a boolean pass field").toEqual([]);
 });
