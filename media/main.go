@@ -182,6 +182,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 
 		for _, target := range othersSnapshot(room, id) {
 			if sender, err := target.pc.AddTrack(local); err == nil {
+				_ = send(target, Signal{Type: "track-published", PeerID: id, Data: mustJSON(map[string]string{"trackId": track.ID()})})
 				target.mu.Lock()
 				if !target.closed {
 					target.subscriptions[publishedID] = sender
@@ -216,6 +217,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 			me.mu.Lock()
 			me.subscriptions[t.ownerID+":"+t.trackID] = sender
 			me.mu.Unlock()
+			_ = send(me, Signal{Type: "track-published", PeerID: t.ownerID, Data: mustJSON(map[string]string{"trackId": t.trackID})})
 		}
 	}
 
@@ -421,7 +423,8 @@ func flushPendingICE(p *Peer) {
 
 func removePublication(room *Room, publishedID string) {
 	room.mu.Lock()
-	if _, ok := room.tracks[publishedID]; !ok {
+	published, ok := room.tracks[publishedID]
+	if !ok {
 		room.mu.Unlock()
 		return
 	}
@@ -434,9 +437,15 @@ func removePublication(room *Room, publishedID string) {
 
 	for _, target := range remaining {
 		if removeSubscription(target, publishedID) {
+			_ = send(target, Signal{Type: "track-removed", PeerID: published.ownerID, Data: mustJSON(map[string]string{"trackId": published.trackID})})
 			renegotiate(target)
 		}
 	}
+}
+
+func mustJSON(value any) json.RawMessage {
+	b, _ := json.Marshal(value)
+	return b
 }
 
 func removeSubscription(p *Peer, publishedID string) bool {
