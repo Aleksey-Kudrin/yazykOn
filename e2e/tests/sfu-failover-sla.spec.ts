@@ -19,7 +19,7 @@ function percentile(values: number[], p: number) {
 
 function token(userId: string) {
   const payload = Buffer.from(JSON.stringify({
-    roomId, userId, role: userId === "p1" ? "host" : "participant",
+    roomId, userId, role: userId === "p1" ? "host" : "member",
     exp: Math.floor(Date.now() / 1000) + 600
   })).toString("base64url");
   return payload + "." + createHmac("sha256", secret).update(payload).digest("base64url");
