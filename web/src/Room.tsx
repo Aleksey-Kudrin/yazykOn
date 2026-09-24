@@ -2,7 +2,7 @@ import React from "react";
 
 interface RoomProps { roomId: string; }
 type SignalMessage =
-  | { type: "joined"; roomId: string; peerId: string; data?: { peers: string[]; tracks?: number } }
+  | { type: "joined"; roomId: string; peerId: string; data?: { peers: string[]; tracks?: number; hostId?: string; locked?: boolean } }
   | { type: "peer-joined"; peerId: string }
   | { type: "peer-left"; peerId: string }
   | { type: "track-published"; peerId: string; data?: { trackId?: string } }
@@ -42,6 +42,8 @@ export function Room({ roomId }: RoomProps) {
   const [mic, setMic] = React.useState(true);
   const [camera, setCamera] = React.useState(true);
   const [participants, setParticipants] = React.useState<string[]>([]);
+  const [selfId, setSelfId] = React.useState("");
+  const [roomLocked, setRoomLocked] = React.useState(false);
   const [hostId, setHostId] = React.useState("");
   const [sharing, setSharing] = React.useState(false);
   const screenTrack = React.useRef<MediaStreamTrack | null>(null);
@@ -132,8 +134,10 @@ export function Room({ roomId }: RoomProps) {
           const message = JSON.parse(event.data) as SignalMessage;
           if (message.type === "joined") {
             const data = message.data;
+            setSelfId(message.peerId);
             setParticipants([message.peerId, ...(data?.peers ?? [])]);
-            setHostId((data as { hostId?: string } | undefined)?.hostId ?? message.peerId);
+            setHostId(data?.hostId ?? message.peerId);
+            setRoomLocked(Boolean(data?.locked));
             setStatus("Комната подключена");
             return;
           }
@@ -158,6 +162,16 @@ export function Room({ roomId }: RoomProps) {
             setRemotes(Array.from(remoteStreams.current, ([id, stream]) => ({ id, stream })));
             setParticipants(current => current.filter(id => id !== message.peerId));
             setStatus("Участник вышел");
+            return;
+          }
+          if (message.type === "room-locked") {
+            setRoomLocked(true);
+            setStatus("Комната закрыта для новых участников");
+            return;
+          }
+          if (message.type === "room-unlocked") {
+            setRoomLocked(false);
+            setStatus("Комната снова открыта");
             return;
           }
           if (message.type === "host-changed") {
@@ -258,14 +272,20 @@ export function Room({ roomId }: RoomProps) {
 
   function muteParticipant(peerId: string) {
     const ws = socket.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN || hostId !== participants[0]) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN || hostId !== selfId) return;
     ws.send(JSON.stringify({ type: "moderate", roomId, data: { action: "mute", peerId } }));
   }
 
   function removeParticipant(peerId: string) {
     const ws = socket.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN || hostId !== participants[0]) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN || hostId !== selfId) return;
     ws.send(JSON.stringify({ type: "moderate", roomId, data: { action: "remove", peerId } }));
+  }
+
+  function toggleRoomLock() {
+    const ws = socket.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || hostId !== selfId) return;
+    ws.send(JSON.stringify({ type: "moderate", roomId, data: { action: roomLocked ? "unlock" : "lock" } }));
   }
 
   function sendChat(event: React.FormEvent) {
@@ -291,13 +311,14 @@ export function Room({ roomId }: RoomProps) {
     <div className="meeting-status">{status} {connected ? "• online" : ""}</div>
     <aside className="participants">
       <strong>Участники ({participants.length})</strong>
-      {participants.map(id => <div key={id} className="participant">{id === participants[0] ? "Вы" : "Участник"} <code>{id.slice(0, 8)}</code>{id === hostId ? " • ведущий" : ""}{hostId === participants[0] && id !== participants[0] ? <><button type="button" onClick={() => muteParticipant(id)}>Микрофон</button><button type="button" onClick={() => removeParticipant(id)}>Удалить</button></> : null}</div>)}
+      {participants.map(id => <div key={id} className="participant">{id === selfId ? "Вы" : "Участник"} <code>{id.slice(0, 8)}</code>{id === hostId ? " • ведущий" : ""}{hostId === selfId && id !== selfId ? <><button type="button" onClick={() => muteParticipant(id)}>Микрофон</button><button type="button" onClick={() => removeParticipant(id)}>Удалить</button></> : null}</div>)}
+      {hostId === selfId && <button type="button" onClick={() => toggleRoomLock()}>{roomLocked ? "🔓 Открыть комнату" : "🔒 Заблокировать комнату"}</button>}
     </aside>
     <section className="chat">
       <strong>Чат</strong>
       <div className="chat-messages">
         {!chat.length && <span className="chat-empty">Сообщений пока нет</span>}
-        {chat.map((message, index) => <div key={message.timestamp + "-" + index} className="chat-message"><code>{message.peerId === participants[0] ? "Вы" : message.peerId.slice(0, 8)}</code><span>{message.text}</span></div>)}
+        {chat.map((message, index) => <div key={message.timestamp + "-" + index} className="chat-message"><code>{message.peerId === selfId ? "Вы" : message.peerId.slice(0, 8)}</code><span>{message.text}</span></div>)}
       </div>
       <form onSubmit={sendChat}>
         <input value={chatText} onChange={event => setChatText(event.target.value)} maxLength={2000} placeholder="Написать сообщение…" />
