@@ -56,7 +56,9 @@ test("browser WebRTC media survives SFU A loss and republishes on SFU B", async 
     const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
     async function connect(endpoint: string, reconnectPeerId = "") {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      const stream = (window as any).__failoverStream as MediaStream | undefined
+        ?? await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      (window as any).__failoverStream = stream;
       state.localTrackReady = stream.getVideoTracks().some(track => track.readyState === "live");
       const pc = new RTCPeerConnection();
       for (const track of stream.getTracks()) pc.addTrack(track, stream);
@@ -163,7 +165,8 @@ test("browser WebRTC media survives SFU A loss and republishes on SFU B", async 
   await page.waitForTimeout(ttlMs + 2000);
 
   const recovery = await page.evaluate(async ({ secondary, roomId, authToken, peerId }) => {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    const stream = (window as any).__failoverStream as MediaStream | undefined;
+    if (!stream) throw new Error("failover local media stream was lost");
     const track = stream.getVideoTracks()[0];
     const pc = new RTCPeerConnection();
     pc.addTrack(track, stream);
@@ -244,7 +247,8 @@ test("browser WebRTC media survives SFU A loss and republishes on SFU B", async 
   await page.waitForTimeout(ttlMs + 2000);
 
   const reverse = await page.evaluate(async ({ primary, roomId, authToken, peerId }) => {
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    const stream = (window as any).__failoverStream as MediaStream | undefined;
+    if (!stream) throw new Error("reverse failover local media stream was lost");
     const track = stream.getVideoTracks()[0];
     if (!track || track.readyState !== "live") throw new Error("reverse failover camera track is not live");
     const pc = new RTCPeerConnection();
