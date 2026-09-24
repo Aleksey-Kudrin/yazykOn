@@ -124,7 +124,7 @@ app.use(helmet());
 app.use(cors({
   origin: (origin, callback) => {
     if (isAllowedOrigin(origin)) callback(null, true);
-    else callback(new Error("CORS_ORIGIN_DENIED"));
+    else callback(null, false);
   },
   credentials: true
 }));
@@ -339,7 +339,15 @@ app.patch("/api/rooms/:id/members/:userId", async (req, res) => {
 const server = createServer(app);
 attachSignaling(server);
 
-initDatabase().then(() => server.listen(port, "0.0.0.0", () => {
-  console.log(`языкOn server listening on http://0.0.0.0:${port}`);
-  console.log(`языкOn signaling listening on ws://0.0.0.0:${port}/ws`);
-}));
+initDatabase().then(() => {
+  if (db) {
+    const cleanup = setInterval(() => {
+      void db.query("DELETE FROM sessions WHERE expires_at <= now()").catch(error => console.error("session cleanup failed", error));
+    }, 60 * 60 * 1000);
+    cleanup.unref();
+  }
+  server.listen(port, "0.0.0.0", () => {
+    console.log(`языкOn server listening on http://0.0.0.0:${port}`);
+    console.log(`языкOn signaling listening on ws://0.0.0.0:${port}/ws`);
+  });
+});
