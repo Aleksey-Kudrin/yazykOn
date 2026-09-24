@@ -21,6 +21,9 @@ jobs:
         with:
           go-version: "1.24"
       - run: npm install
+      - name: Install web dependencies
+        working-directory: web
+        run: npm install
       - run: npx playwright install --with-deps chromium
       - name: Start Redis and two SFUs
         working-directory: .
