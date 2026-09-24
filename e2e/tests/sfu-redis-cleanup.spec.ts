@@ -1,9 +1,12 @@
 import { createHmac } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { test, expect } from "@playwright/test";
 
 const endpoint = process.env.SFU_PRIMARY_URL ?? "http://127.0.0.1:4100";
 const redisUrl = process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
 const secret = process.env.ROOM_ACCESS_SECRET ?? "integration-secret";
+const artifactDir = process.env.SFU_ARTIFACT_DIR ?? "artifacts";
 
 function token(roomId: string, userId: string) {
   const payload = Buffer.from(JSON.stringify({
@@ -42,6 +45,7 @@ test("empty SFU room removes Redis ownership and state", async () => {
 
   const peerId = await peerIdPromise;
   expect(peerId).toBeTruthy();
+  const started = Date.now();
 
   const ownerKey = `yazykon:sfu:owner:${roomId}`;
   const stateKey = `yazykon:sfu:state:${roomId}`;
@@ -59,7 +63,11 @@ test("empty SFU room removes Redis ownership and state", async () => {
         client.exists(tracksKey),
         client.keys(peerPattern)
       ]);
-      if (owner === 0 && state === 0 && tracks === 0 && peers.length === 0) return;
+      if (owner === 0 && state === 0 && tracks === 0 && peers.length === 0) {
+        fs.mkdirSync(artifactDir, { recursive: true });
+        fs.writeFileSync(path.join(artifactDir, "sfu-redis-cleanup-report.json"), JSON.stringify({ roomId, peerId, cleanupMs: Date.now() - started, pass: true }, null, 2));
+        return;
+      }
       await new Promise(resolve => setTimeout(resolve, 250));
     }
 
@@ -73,6 +81,8 @@ test("empty SFU room removes Redis ownership and state", async () => {
     expect(state).toBe(0);
     expect(tracks).toBe(0);
     expect(peers).toHaveLength(0);
+    fs.mkdirSync(artifactDir, { recursive: true });
+    fs.writeFileSync(path.join(artifactDir, "sfu-redis-cleanup-report.json"), JSON.stringify({ roomId, peerId, cleanupMs: Date.now() - started, pass: true }, null, 2));
   } finally {
     await client.del(ownerKey, stateKey, tracksKey);
     const peers = await client.keys(peerPattern);
