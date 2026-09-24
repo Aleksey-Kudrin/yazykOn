@@ -16,6 +16,8 @@ services:
       INSTANCE_ID: integration-primary
       SFU_WS_URL: ws://127.0.0.1:4100
       ROOM_ACCESS_SECRET: integration-secret
+      SFU_ROOM_OWNER_TTL: 3s
+      SFU_CLUSTER_HEARTBEAT: 1s
       WEB_ORIGINS: http://localhost:5173
     ports:
       - "4100:4000/tcp"
@@ -32,6 +34,8 @@ services:
       INSTANCE_ID: integration-secondary
       SFU_WS_URL: ws://127.0.0.1:4200
       ROOM_ACCESS_SECRET: integration-secret
+      SFU_ROOM_OWNER_TTL: 3s
+      SFU_CLUSTER_HEARTBEAT: 1s
       WEB_ORIGINS: http://localhost:5173
     ports:
       - "4200:4000/tcp"
