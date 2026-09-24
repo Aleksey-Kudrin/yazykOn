@@ -9,6 +9,7 @@ type SignalMessage =
   | { type: "track-removed"; peerId: string; data?: { trackId?: string } }
   | { type: "chat"; peerId: string; data?: { text?: string; timestamp?: number } }
   | { type: "removed"; data?: { reason?: string } }
+  | { type: "muted"; data?: { by?: string } }
   | { type: "host-changed"; peerId: string }
   | { type: "offer"; data: RTCSessionDescriptionInit }
   | { type: "answer"; data: RTCSessionDescriptionInit }
@@ -164,6 +165,12 @@ export function Room({ roomId }: RoomProps) {
             setStatus("Роль ведущего передана");
             return;
           }
+          if (message.type === "muted") {
+            localStream.current?.getAudioTracks().forEach(track => track.enabled = false);
+            setMic(false);
+            setStatus("Ведущий выключил ваш микрофон");
+            return;
+          }
           if (message.type === "removed") {
             setStatus("Вы были удалены ведущим");
             socket.current?.close();
@@ -249,6 +256,12 @@ export function Room({ roomId }: RoomProps) {
     }
   }
 
+  function muteParticipant(peerId: string) {
+    const ws = socket.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || hostId !== participants[0]) return;
+    ws.send(JSON.stringify({ type: "moderate", roomId, data: { action: "mute", peerId } }));
+  }
+
   function removeParticipant(peerId: string) {
     const ws = socket.current;
     if (!ws || ws.readyState !== WebSocket.OPEN || hostId !== participants[0]) return;
@@ -278,7 +291,7 @@ export function Room({ roomId }: RoomProps) {
     <div className="meeting-status">{status} {connected ? "• online" : ""}</div>
     <aside className="participants">
       <strong>Участники ({participants.length})</strong>
-      {participants.map(id => <div key={id} className="participant">{id === participants[0] ? "Вы" : "Участник"} <code>{id.slice(0, 8)}</code>{id === hostId ? " • ведущий" : ""}{hostId === participants[0] && id !== participants[0] ? <button type="button" onClick={() => removeParticipant(id)}>Удалить</button> : null}</div>)}
+      {participants.map(id => <div key={id} className="participant">{id === participants[0] ? "Вы" : "Участник"} <code>{id.slice(0, 8)}</code>{id === hostId ? " • ведущий" : ""}{hostId === participants[0] && id !== participants[0] ? <><button type="button" onClick={() => muteParticipant(id)}>Микрофон</button><button type="button" onClick={() => removeParticipant(id)}>Удалить</button></> : null}</div>)}
     </aside>
     <section className="chat">
       <strong>Чат</strong>
