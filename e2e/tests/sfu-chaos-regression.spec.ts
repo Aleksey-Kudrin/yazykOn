@@ -6,7 +6,6 @@ import { test, expect } from "@playwright/test";
 
 const primary = process.env.SFU_PRIMARY_URL ?? "http://127.0.0.1:4100";
 const secondary = process.env.SFU_SECONDARY_URL ?? "http://127.0.0.1:4200";
-const redisUrl = process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
 const composeFile = process.env.SFU_FAILOVER_COMPOSE ?? "e2e/docker-compose.sfu-failover.yml";
 const secret = process.env.ROOM_ACCESS_SECRET ?? "integration-secret";
 const rounds = Math.max(3, Number(process.env.SFU_REGRESSION_CYCLES ?? 4));
@@ -47,8 +46,8 @@ async function waitHealth(endpoint: string) {
   throw new Error("SFU health timeout: " + endpoint);
 }
 
-async function join(endpoint: string, roomId: string, peerId?: string) {
-  return await globalThis.__playwrightPage!.evaluate(async ({ endpoint, roomId, accessToken, peerId }) => {
+async function join(page: import("@playwright/test").Page, endpoint: string, roomId: string, peerId?: string) {
+  return await page.evaluate(async ({ endpoint, roomId, accessToken, peerId }) => {
     const pc = new RTCPeerConnection();
     const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
     for (const track of stream.getTracks()) pc.addTrack(track, stream);
@@ -99,8 +98,6 @@ test("SFU chaos regression keeps recovery latency and active-state bounded", asy
   test.skip(!process.env.SFU_FAILOVER_LIVE, "Set SFU_FAILOVER_LIVE=1 for the live Docker run");
 
   await page.goto(primary + "/health");
-  (globalThis as any).__playwrightPage = page;
-
   const before = await Promise.all([metrics(primary), metrics(secondary)]);
   const roomId = "SFU-REGRESSION-" + Date.now();
   const recoveryMs: number[] = [];
@@ -124,11 +121,12 @@ test("SFU chaos regression keeps recovery latency and active-state bounded", asy
       expect(recovered.peerId).toBe(peerId);
       recovered.close();
 
-      recovered.close();\n\n      execFileSync("docker", ["compose", "-f", composeFile, "start", "sfu-primary"], { stdio: "inherit" });
+      execFileSync("docker", ["compose", "-f", composeFile, "start", "sfu-primary"], { stdio: "inherit" });
       await waitHealth(primary);
     }
 
-    initial.close();\n    await new Promise(resolve => setTimeout(resolve, 1000));\n    const after = await Promise.all([metrics(primary), metrics(secondary)]);
+    initial.close();
+    await new Promise(resolve => setTimeout(resolve, 1000));\n    const after = await Promise.all([metrics(primary), metrics(secondary)]);
     const percentile = (values: number[], p: number) => {
       const sorted = [...values].sort((a, b) => a - b);
       return sorted[Math.min(sorted.length - 1, Math.ceil(values.length * p) - 1)];
@@ -173,6 +171,5 @@ test("SFU chaos regression keeps recovery latency and active-state bounded", asy
   } finally {
     execFileSync("docker", ["compose", "-f", composeFile, "start", "sfu-primary"], { stdio: "inherit" });
     await waitHealth(primary).catch(() => {});
-    (globalThis as any).__playwrightPage = undefined;
   }
 });
