@@ -33,7 +33,7 @@ export function attachSignaling(server: HttpServer) {
   const wss = new WebSocketServer({
     server,
     path: "/ws",
-    verifyClient: ({ origin }) => allowedOrigin(origin)
+    verifyClient: (info) => allowedOrigin(info.origin)
   });
 
   wss.on("connection", (socket) => {
