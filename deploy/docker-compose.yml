@@ -17,6 +17,8 @@ services:
       MEDIA_CONTROL_SECRET: ${MEDIA_CONTROL_SECRET:-}
       WEB_ORIGINS: ${WEB_ORIGINS:-}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      INSTANCE_ID: ${SFU_INSTANCE_ID:-media-1}
+      SFU_WS_URL: ${SFU_WS_URL:-}
       MAX_ROOM_PEERS: ${MAX_ROOM_PEERS:-32}
     expose:
       - "3000"
