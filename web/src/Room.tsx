@@ -8,6 +8,8 @@ type SignalMessage =
   | { type: "track-published"; peerId: string; data?: { trackId?: string } }
   | { type: "track-removed"; peerId: string; data?: { trackId?: string } }
   | { type: "chat"; peerId: string; data?: { text?: string; timestamp?: number } }
+  | { type: "removed"; data?: { reason?: string } }
+  | { type: "host-changed"; peerId: string }
   | { type: "offer"; data: RTCSessionDescriptionInit }
   | { type: "answer"; data: RTCSessionDescriptionInit }
   | { type: "ice"; data: RTCIceCandidateInit }
@@ -39,6 +41,7 @@ export function Room({ roomId }: RoomProps) {
   const [mic, setMic] = React.useState(true);
   const [camera, setCamera] = React.useState(true);
   const [participants, setParticipants] = React.useState<string[]>([]);
+  const [hostId, setHostId] = React.useState("");
   const [sharing, setSharing] = React.useState(false);
   const screenTrack = React.useRef<MediaStreamTrack | null>(null);
   const [chat, setChat] = React.useState<Array<{ peerId: string; text: string; timestamp: number }>>([]);
@@ -129,6 +132,7 @@ export function Room({ roomId }: RoomProps) {
           if (message.type === "joined") {
             const data = message.data;
             setParticipants([message.peerId, ...(data?.peers ?? [])]);
+            setHostId((data as { hostId?: string } | undefined)?.hostId ?? message.peerId);
             setStatus("Комната подключена");
             return;
           }
@@ -153,6 +157,17 @@ export function Room({ roomId }: RoomProps) {
             setRemotes(Array.from(remoteStreams.current, ([id, stream]) => ({ id, stream })));
             setParticipants(current => current.filter(id => id !== message.peerId));
             setStatus("Участник вышел");
+            return;
+          }
+          if (message.type === "host-changed") {
+            setHostId(message.peerId);
+            setStatus("Роль ведущего передана");
+            return;
+          }
+          if (message.type === "removed") {
+            setStatus("Вы были удалены ведущим");
+            socket.current?.close();
+            peer.current?.close();
             return;
           }
           if (message.type === "chat") {
@@ -234,6 +249,12 @@ export function Room({ roomId }: RoomProps) {
     }
   }
 
+  function removeParticipant(peerId: string) {
+    const ws = socket.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || hostId !== participants[0]) return;
+    ws.send(JSON.stringify({ type: "moderate", roomId, data: { action: "remove", peerId } }));
+  }
+
   function sendChat(event: React.FormEvent) {
     event.preventDefault();
     const text = chatText.trim();
@@ -257,7 +278,7 @@ export function Room({ roomId }: RoomProps) {
     <div className="meeting-status">{status} {connected ? "• online" : ""}</div>
     <aside className="participants">
       <strong>Участники ({participants.length})</strong>
-      {participants.map(id => <div key={id} className="participant">{id === participants[0] ? "Вы" : "Участник"} <code>{id.slice(0, 8)}</code></div>)}
+      {participants.map(id => <div key={id} className="participant">{id === participants[0] ? "Вы" : "Участник"} <code>{id.slice(0, 8)}</code>{id === hostId ? " • ведущий" : ""}{hostId === participants[0] && id !== participants[0] ? <button type="button" onClick={() => removeParticipant(id)}>Удалить</button> : null}</div>)}
     </aside>
     <section className="chat">
       <strong>Чат</strong>
