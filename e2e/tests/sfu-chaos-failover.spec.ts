@@ -115,8 +115,6 @@ test("chaos: repeated reconnect plus simultaneous SFU/Redis outage preserves med
   expect(initial).toBeTruthy();
   const firstSession = initial!.sessionId;
 
-  // Reconnect repeatedly without a server failure. This catches stale WebSocket,
-  // peer/session and publication cleanup bugs before the harder infrastructure chaos.
   for (let cycle = 1; cycle <= 3; cycle++) {
     const recovery = await page.evaluate(async ({ primary, roomId, authToken, peerId }) => {
       const stream = (window as any).__chaosStream as MediaStream | undefined;
@@ -152,7 +150,7 @@ test("chaos: repeated reconnect plus simultaneous SFU/Redis outage preserves med
       });
       ws.send(JSON.stringify({ type: "join", roomId, peerId, data: { accessToken: authToken, reconnect: true } }));
       const joined = await next("joined");
-      expect(joined.peerId).toBe(peerId);
+      if (joined.peerId !== peerId) throw new Error("peer ID changed during reconnect");
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       ws.send(JSON.stringify({ type: "offer", roomId, data: pc.localDescription }));
@@ -174,9 +172,6 @@ test("chaos: repeated reconnect plus simultaneous SFU/Redis outage preserves med
     expect(current!.sessionId).not.toBe(firstSession);
   }
 
-  // Hard outage: all SFU nodes and Redis go down together. Recovery starts
-  // Redis first, then both SFUs; the browser keeps its local MediaStream alive
-  // and reconnects with the same stable peer ID after the owner lease expires.
   compose("stop", "sfu-primary", "sfu-secondary", "redis");
   await new Promise(resolve => setTimeout(resolve, ttlMs + 1500));
   compose("start", "redis", "sfu-primary", "sfu-secondary");
@@ -219,6 +214,7 @@ test("chaos: repeated reconnect plus simultaneous SFU/Redis outage preserves med
     });
     ws.send(JSON.stringify({ type: "join", roomId, peerId, data: { accessToken: authToken, reconnect: true } }));
     const joined = await next("joined");
+    if (joined.peerId !== peerId) throw new Error("peer ID changed after full infrastructure outage");
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     ws.send(JSON.stringify({ type: "offer", roomId, data: pc.localDescription }));
