@@ -33,6 +33,11 @@ type ChatMessage struct {
 	Text string `json:"text"`
 }
 
+type ModerationCommand struct {
+	Action string `json:"action"`
+	PeerID string `json:"peerId"`
+}
+
 type Peer struct {
 	id        string
 	room      *Room
@@ -49,6 +54,7 @@ type Peer struct {
 
 type Room struct {
 	id     string
+	hostID string
 	mu     sync.RWMutex
 	peers  map[string]*Peer
 	tracks map[string]*PublishedTrack
@@ -147,6 +153,12 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	room := getRoom(first.RoomID)
+	room.mu.Lock()
+	if room.hostID == "" {
+		room.hostID = id
+	}
+	hostID := room.hostID
+	room.mu.Unlock()
 	me := &Peer{id: id, room: room, conn: conn, pc: pc, published: make(map[string]*webrtc.TrackLocalStaticRTP), subscriptions: make(map[string]*webrtc.RTPSender)}
 
 	room.mu.Lock()
@@ -233,7 +245,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	})
 
-	b, _ := json.Marshal(map[string]any{"peers": peerIDs(others), "tracks": len(tracks)})
+	b, _ := json.Marshal(map[string]any{"peers": peerIDs(others), "tracks": len(tracks), "hostId": hostID})
 	_ = send(me, Signal{Type: "joined", RoomID: room.id, PeerID: id, Data: b})
 	for _, other := range others {
 		_ = send(other, Signal{Type: "peer-joined", PeerID: id})
@@ -287,6 +299,20 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 					negotiationFinished(me)
 				}
 			}
+		case "moderate":
+			var cmd ModerationCommand
+			if json.Unmarshal(msg.Data, &cmd) != nil || cmd.Action == "" || cmd.PeerID == "" {
+				continue
+			}
+			if cmd.Action != "remove" || me.id != roomHostID(room) || cmd.PeerID == me.id {
+				_ = send(me, Signal{Type: "error", Data: mustJSON(map[string]string{"code": "MODERATION_DENIED"})})
+				continue
+			}
+			target := findPeer(room, cmd.PeerID)
+			if target != nil {
+				_ = send(target, Signal{Type: "removed", Data: mustJSON(map[string]string{"reason": "removed_by_host"})})
+				removePeer(target)
+			}
 		case "chat":
 			var chat ChatMessage
 			if err := json.Unmarshal(msg.Data, &chat); err != nil {
@@ -329,6 +355,18 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	removePeer(me)
+}
+
+func roomHostID(room *Room) string {
+	room.mu.RLock()
+	defer room.mu.RUnlock()
+	return room.hostID
+}
+
+func findPeer(room *Room, id string) *Peer {
+	room.mu.RLock()
+	defer room.mu.RUnlock()
+	return room.peers[id]
 }
 
 func othersSnapshot(room *Room, self string) []*Peer {
