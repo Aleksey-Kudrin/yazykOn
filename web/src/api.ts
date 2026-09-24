@@ -25,9 +25,10 @@ export async function getRoom(id: string): Promise<Room> {
   return response.json();
 }
 
-export async function accessRoom(id: string, password = ""): Promise<{ accessToken: string | null }> {
+export async function accessRoom(id: string, password = ""): Promise<{ accessToken: string | null; role: "host" | "cohost" | "member" | null }> {
   const response = await fetch(`${API_URL}/api/rooms/${encodeURIComponent(id)}/access`, {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ password })
   });
