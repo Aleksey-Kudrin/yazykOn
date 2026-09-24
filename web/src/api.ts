@@ -11,6 +11,7 @@ const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
 export async function createRoom(name: string, password = ""): Promise<Room> {
   const response = await fetch(`${API_URL}/api/rooms`, {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name, password })
   });
@@ -19,7 +20,7 @@ export async function createRoom(name: string, password = ""): Promise<Room> {
 }
 
 export async function getRoom(id: string): Promise<Room> {
-  const response = await fetch(`${API_URL}/api/rooms/${encodeURIComponent(id)}`);
+  const response = await fetch(`${API_URL}/api/rooms/${encodeURIComponent(id)}`, { credentials: "include" });
   if (!response.ok) throw new Error("Комната не найдена");
   return response.json();
 }
