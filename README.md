@@ -26,7 +26,9 @@ Browser / Desktop / Android
 - Signaling: WebSocket
 - Reverse proxy: Nginx
 - Deployment: Docker Compose on Proxmox LXC
-- PostgreSQL, Redis and coturn: planned
+- PostgreSQL-backed users, sessions and room ownership
+- Redis: planned
+- coturn
 - Desktop: Electron, planned
 - Android: Kotlin, planned
 
@@ -47,7 +49,7 @@ The project has a working custom SFU prototype:
 - Docker Compose deployment;
 - GitHub Actions builds for server, web and media.
 
-The media server exposes `/health` and `/ws`. Room metadata and password hashes are currently kept in memory. Password-protected rooms use an HMAC-signed access token shared between the API and media plane; PostgreSQL-backed persistence and full user authentication are still planned.
+The media server exposes `/health` and `/ws`. User accounts and sessions are persisted in PostgreSQL; room runtime state and password metadata are still mirrored in the SFU/in-memory layer. Room access uses an HMAC-signed token shared between the API and media plane. Registration and login are available through the web client.
 
 ## Development
 
