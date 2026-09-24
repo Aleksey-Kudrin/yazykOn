@@ -252,7 +252,10 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	})
 
-	b, _ := json.Marshal(map[string]any{"peers": peerIDs(others), "tracks": len(tracks), "hostId": hostID})
+	room.mu.RLock()
+	locked := room.locked
+	room.mu.RUnlock()
+	b, _ := json.Marshal(map[string]any{"peers": peerIDs(others), "tracks": len(tracks), "hostId": hostID, "locked": locked})
 	_ = send(me, Signal{Type: "joined", RoomID: room.id, PeerID: id, Data: b})
 	for _, other := range others {
 		_ = send(other, Signal{Type: "peer-joined", PeerID: id})
