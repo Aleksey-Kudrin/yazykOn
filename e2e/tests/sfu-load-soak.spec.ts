@@ -21,15 +21,18 @@ test("SFU load soak: concurrent participants reconnect repeatedly", async ({ bro
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
       const pc = new RTCPeerConnection();
       for (const track of stream.getTracks()) pc.addTrack(track, stream);
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
       return {
         index,
         live: stream.getVideoTracks().every(track => track.readyState === "live"),
-        connectionState: pc.connectionState
+        connectionState: pc.connectionState,
+        offerReady: Boolean(pc.localDescription?.sdp)
       };
     }, { endpoint: primary, index }));
   }));
 
-  expect(results.filter(result => result.live)).toHaveLength(participants);
+  expect(results.filter(result => result.live && result.offerReady)).toHaveLength(participants);
 
   for (let round = 0; round < rounds; round++) {
     const target = round % 2 === 0 ? secondary : primary;
