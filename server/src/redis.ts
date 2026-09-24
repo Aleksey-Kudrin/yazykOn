@@ -50,8 +50,12 @@ export async function redisGetPresence(roomId: string, userId: string) {
 export async function redisListPresence(roomId: string) {
   const redis = await getRedis();
   if (!redis) return [];
-  const keys = await redis.keys(`yazykon:presence:${roomId}:*`);
-  return keys.map(key => key.slice(`yazykon:presence:${roomId}:`.length));
+  const prefix = `yazykon:presence:${roomId}:`;
+  const users: string[] = [];
+  for await (const key of redis.scanIterator({ MATCH: `${prefix}*`, COUNT: 100 })) {
+    users.push(key.slice(prefix.length));
+  }
+  return users;
 }
 
 export async function redisSubscribe(channel: string, handler: (payload: unknown) => void) {
