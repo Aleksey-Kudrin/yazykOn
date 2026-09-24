@@ -1,5 +1,13 @@
 {
-  "name":"yazykon-e2e","private":true,"type":"module",
-  "scripts":{"test":"playwright test","test:ui":"playwright test --ui"},
-  "devDependencies":{"@playwright/test":"^1.55.0"}
+  "name": "yazykon-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "test:ui": "playwright test --ui"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "redis": "^5.8.2"
+  }
 }

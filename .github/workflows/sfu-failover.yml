@@ -1,0 +1,95 @@
+name: SFU failover integration
+
+on:
+  workflow_dispatch:
+
+jobs:
+  failover:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: e2e
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+      - name: Start Redis and two SFUs
+        working-directory: .
+        run: |
+          docker compose -p yazykon-sfu-it -f e2e/docker-compose.sfu-failover.yml up -d --build
+      - name: Wait for SFUs
+        run: |
+          for url in http://127.0.0.1:4100/health http://127.0.0.1:4200/health; do
+            ready=0
+            for i in $(seq 1 60); do
+              if curl -fsS "$url" >/dev/null; then ready=1; break; fi
+              sleep 1
+            done
+            test "$ready" -eq 1
+          done
+      - name: Run failover, load, chaos and soak probes
+        env:
+          SFU_FAILOVER_LIVE: "1"
+          SFU_CHAOS_LIVE: "1"
+          SFU_FAILOVER_WAIT_MS: "5000"
+          SFU_SLA_CYCLES: "4"
+          SFU_FAILOVER_SLA_MS: "30000"
+          SFU_ROOM_OWNER_TTL: 3s
+          SFU_CLUSTER_HEARTBEAT: 1s
+          SFU_LOAD_ROOMS: "3"
+          SFU_LOAD_PARTICIPANTS: "8"
+          SFU_LOAD_CYCLES: "3"
+          SFU_METRICS_SAMPLE_MS: "1000"
+          SFU_SOAK_DURATION_MS: "120000"
+          SFU_SOAK_SAMPLE_MS: "2000"
+          SFU_SOAK_MAX_ERROR_RATE: "0.01"
+          SFU_SOAK_CYCLE_MS: "10000"
+          SFU_REGRESSION_CYCLES: "4"
+          SFU_REGRESSION_MAX_ACTIVE_DELTA: "1"
+          SFU_REGRESSION_MAX_ROOM_DELTA: "0"
+          SFU_REGRESSION_MAX_TRACK_DELTA: "0"
+          SFU_REGRESSION_MAX_RESOURCE_GROWTH: "0.20"
+          SFU_ARTIFACT_DIR: artifacts
+          COMPOSE_PROJECT_NAME: yazykon-sfu-it
+          ROOM_ACCESS_SECRET: integration-secret
+          REDIS_URL: redis://127.0.0.1:6379
+          SFU_PRIMARY_URL: http://127.0.0.1:4100
+          SFU_SECONDARY_URL: http://127.0.0.1:4200
+        run: npx playwright test tests/sfu-failover.spec.ts tests/sfu-primary-crash-takeover.spec.ts tests/sfu-cross-node-reconnect.spec.ts tests/sfu-track-recovery.spec.ts tests/sfu-room-ownership.spec.ts tests/sfu-failover-stress.spec.ts tests/sfu-browser-media-failover.spec.ts tests/sfu-chaos-failover.spec.ts tests/sfu-multi-participant.spec.ts tests/sfu-load-soak.spec.ts tests/sfu-metrics.spec.ts tests/sfu-failover-latency.spec.ts tests/sfu-failover-sla.spec.ts tests/sfu-concurrent-rooms.spec.ts tests/sfu-redis-outage.spec.ts tests/sfu-redis-cleanup.spec.ts tests/sfu-multi-room-failover.spec.ts tests/sfu-remote-media-failover.spec.ts tests/sfu-failover-load-soak.spec.ts tests/sfu-performance-report.spec.ts tests/sfu-capacity-soak.spec.ts tests/sfu-chaos-regression.spec.ts tests/sfu-long-soak.spec.ts
+      - name: Run repeated churn leak probe
+        env:
+          SFU_FAILOVER_LIVE: "1"
+          SFU_CHURN_ROUNDS: "12"
+          ROOM_ACCESS_SECRET: integration-secret
+          REDIS_URL: redis://127.0.0.1:6379
+          SFU_PRIMARY_URL: http://127.0.0.1:4100
+        run: npx playwright test tests/sfu-churn-leak.spec.ts
+      - name: Collect failover artifacts
+        if: always()
+        working-directory: .
+        run: |
+          mkdir -p e2e/artifacts
+          docker compose -p yazykon-sfu-it -f e2e/docker-compose.sfu-failover.yml ps > e2e/artifacts/compose-ps.txt || true
+          docker compose -p yazykon-sfu-it -f e2e/docker-compose.sfu-failover.yml logs --no-color > e2e/artifacts/sfu.log || true
+          curl -fsS http://127.0.0.1:4100/metrics > e2e/artifacts/primary-metrics.txt || true
+          curl -fsS http://127.0.0.1:4200/metrics > e2e/artifacts/secondary-metrics.txt || true
+          docker stats --no-stream > e2e/artifacts/docker-stats.txt || true
+          test -f e2e/artifacts/sfu-chaos-regression-report.json || true
+          test -f e2e/artifacts/sfu-long-soak-report.json || true
+      - name: Upload failover artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yazykon-sfu-failover-${{ github.run_id }}
+          path: e2e/artifacts
+          if-no-files-found: warn
+      - name: Cleanup
+        if: always()
+        working-directory: .
+        run: docker compose -p yazykon-sfu-it -f e2e/docker-compose.sfu-failover.yml down -v
