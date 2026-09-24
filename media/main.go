@@ -202,7 +202,7 @@ func handleRoleControl(w http.ResponseWriter, r *http.Request) {
 	payload := mustJSON(map[string]string{"userId": target.userID, "role": newRole})
 	for _, p := range peers { _ = send(p, Signal{Type: "role-updated", PeerID: target.id, Data: payload}) }
 	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write([]byte("{"ok":true}"))
+	_, _ = w.Write([]byte(`{"ok":true}`))
 }
 
 func handleWS(w http.ResponseWriter, r *http.Request) {
