@@ -15,6 +15,7 @@ function token(roomId: string, userId: string) {
 }
 
 async function join(page: import("@playwright/test").Page, roomId: string, userId: string) {
+  if (page.url() === "about:blank") await page.goto(process.env.BASE_URL ?? "http://localhost:5173");
   return page.evaluate(async ({ endpoint, roomId, accessToken }) => {
     const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
     const pc = new RTCPeerConnection();
