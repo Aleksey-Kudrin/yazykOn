@@ -54,7 +54,7 @@ async function join(page: import("@playwright/test").Page, endpoint: string, roo
   if (page.url() === "about:blank") await page.goto(process.env.BASE_URL ?? "http://localhost:5173");
   return page.evaluate(async ({ endpoint, roomId, accessToken, peerId }) => {
     const store = (globalThis as any).__sfuRegressionConnections ??= new Map();
-    const connectionId = crypto.randomUUID();
+    const connectionId = crypto.randomUUID?.() ?? Array.from(crypto.getRandomValues(new Uint8Array(16)), value => value.toString(16).padStart(2, "0")).join("");
     const pc = new RTCPeerConnection();
     const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
     for (const track of stream.getTracks()) pc.addTrack(track, stream);
