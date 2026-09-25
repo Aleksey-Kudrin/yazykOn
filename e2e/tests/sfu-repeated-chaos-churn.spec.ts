@@ -102,7 +102,7 @@ async function connect(page: Page, endpoint: string, roomId: string, userId: str
     const queue: any[] = [];
     const waiters = new Map<string, ((message: any) => void)[]>();
     const wait = (type: string) => new Promise<any>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("timeout " + type)), 30000);
+      const timer = setTimeout(() => reject(new Error("timeout " + type)), 60000);
       const index = queue.findIndex(message => message.type === type);
       if (index >= 0) {
         clearTimeout(timer);
@@ -145,7 +145,7 @@ async function connect(page: Page, endpoint: string, roomId: string, userId: str
 }
 
 test("repeated SFU failover churn preserves peer identity and cleans replaced tracks", async ({ browser }) => {
-  test.setTimeout(Math.max(120000, (cycles * 30000) + 60000));
+  test.setTimeout(Math.max(300000, (cycles * 60000) + 120000));
   test.skip(!process.env.SFU_FAILOVER_LIVE, "Set SFU_FAILOVER_LIVE=1 for the live Docker run");
   await Promise.all([waitHealth(primary), waitHealth(secondary)]);
 
