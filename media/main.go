@@ -656,7 +656,9 @@ func main() {
 		nodeID := clusterNodeID
 		clusterMu.RUnlock()
 		lastSync := clusterLastSync.Load()
-		clusterHealthy := clusterReady.Load() && lastSync > 0 && time.Since(time.Unix(0, lastSync)) <= 3*sfuClusterHeartbeat()
+		clusterGrace := 5 * sfuClusterHeartbeat()
+		if clusterGrace < 5*time.Second { clusterGrace = 5 * time.Second }
+		clusterHealthy := clusterReady.Load() && lastSync > 0 && time.Since(time.Unix(0, lastSync)) <= clusterGrace
 		payload := map[string]any{"ok": true, "service": "yazykOn-sfu", "version": "0.6.0", "mediaUdpRange": "50000-50100", "nodeId": nodeID, "cluster": clusterHealthy}
 		_ = json.NewEncoder(w).Encode(payload)
 	})
