@@ -42,6 +42,33 @@ async function closeServer(server: ReturnType<typeof createServer>) {
   await new Promise<void>(resolve => server.close(() => resolve()));
 }
 
+test("join acknowledges from local state before asynchronous cluster reconciliation", async () => {
+  const server = createServer();
+  attachSignaling(server);
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", () => resolve()));
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+
+  const first = connect(address.port, "fast-join-room", "peer-a");
+  await first.opened;
+  first.socket.send(JSON.stringify({ type: "join", roomId: "fast-join-room", peerId: "peer-a" }));
+  const firstJoined = await first.nextMessage("joined");
+  assert.equal(firstJoined.peerId, "peer-a");
+  assert.deepEqual(firstJoined.peers, []);
+
+  const second = connect(address.port, "fast-join-room", "peer-b");
+  await second.opened;
+  second.socket.send(JSON.stringify({ type: "join", roomId: "fast-join-room", peerId: "peer-b" }));
+  const secondJoined = await second.nextMessage("joined");
+  assert.equal(secondJoined.peerId, "peer-b");
+  assert.deepEqual(secondJoined.peers, ["peer-a"]);
+
+  second.socket.close();
+  first.socket.close();
+  await new Promise(resolve => setTimeout(resolve, 25));
+  await closeServer(server);
+});
+
 test("duplicate peer id replaces the old local session without emitting a stale peer-left", async () => {
   const server = createServer();
   attachSignaling(server);
