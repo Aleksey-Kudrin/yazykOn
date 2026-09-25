@@ -206,9 +206,11 @@ test("repeated SFU failover churn preserves peer identity and cleans replaced tr
       expect(takeover.owner?.nodeId).toBe(cycle % 2 === 0 ? "integration-secondary" : "integration-primary");
 
       await waitHealth(to, true);
-      const recovered = await Promise.all(participants.map((p, index) =>
-        connect(p.page, to, roomId, p.userId, p.peerId, cycle > 0 && index === cycle % members)
-      ));
+      const recovered = [] as Awaited<ReturnType<typeof connect>>[];
+      for (let index = 0; index < participants.length; index++) {
+        const p = participants[index];
+        recovered.push(await connect(p.page, to, roomId, p.userId, p.peerId, cycle > 0 && index === cycle % members));
+      }
 
       recovered.forEach((r, i) => {
         expect(r.peerId).toBe(participants[i].peerId);
