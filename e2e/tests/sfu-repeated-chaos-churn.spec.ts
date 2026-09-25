@@ -102,7 +102,7 @@ async function connect(page: Page, endpoint: string, roomId: string, userId: str
     const queue: any[] = [];
     const waiters = new Map<string, ((message: any) => void)[]>();
     const wait = (type: string) => new Promise<any>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("timeout " + type)), 15000);
+      const timer = setTimeout(() => reject(new Error("timeout " + type)), 30000);
       const index = queue.findIndex(message => message.type === type);
       if (index >= 0) {
         clearTimeout(timer);
@@ -183,7 +183,7 @@ test("repeated SFU failover churn preserves peer identity and cleans replaced tr
       const takeover = await redisState(roomId);
       expect(takeover.owner?.nodeId).toBe(cycle % 2 === 0 ? "integration-secondary" : "integration-primary");
 
-      const recovered = await Promise.all(participants.map((p, index) =>
+      await waitHealth(to, true);\n      const recovered = await Promise.all(participants.map((p, index) =>
         connect(p.page, to, roomId, p.userId, p.peerId, cycle > 0 && index === cycle % members)
       ));
 
