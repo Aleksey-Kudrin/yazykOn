@@ -75,7 +75,24 @@ async function connect(page: import("@playwright/test").Page, endpoint: string, 
       void video.play().then(tick).catch(() => undefined);
     };
     for (const track of state.stream.getTracks()) pc.addTrack(track, state.stream);
-    const ws = new WebSocket(endpoint.replace(/^http/, "ws") + "/ws");
+    let ws: WebSocket | undefined;
+    let lastWsError: Error | undefined;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        ws = new WebSocket(endpoint.replace(/^http/, "ws") + "/ws");
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error("websocket open timeout")), 5000);
+          ws!.onopen = () => { clearTimeout(timer); resolve(); };
+          ws!.onerror = () => { clearTimeout(timer); reject(new Error("websocket failed")); };
+        });
+        break;
+      } catch (error) {
+        lastWsError = error as Error;
+        try { ws?.close(); } catch {}
+        await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+      }
+    }
+    if (!ws) throw lastWsError ?? new Error("websocket failed");
     const queue: any[] = [];
     const waiters = new Map<string, ((m: any) => void)[]>();
     const wait = (type: string) => new Promise<any>((resolve, reject) => {
