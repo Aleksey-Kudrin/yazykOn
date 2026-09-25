@@ -8,6 +8,7 @@ export default defineConfig({
   use: {
     baseURL: process.env.BASE_URL ?? "http://localhost:5173",
     trace: "retain-on-failure",
+    permissions: ["camera", "microphone"],
     launchOptions: {
       args: [
         "--use-fake-device-for-media-stream",
