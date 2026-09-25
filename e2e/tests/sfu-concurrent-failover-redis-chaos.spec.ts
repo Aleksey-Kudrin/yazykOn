@@ -59,6 +59,7 @@ async function waitHealth(endpoint: string, expectedCluster = true) {
 }
 
 async function connect(page: Page, endpoint: string, roomId: string, userId: string, peerId = "") {
+  if (page.url() === "about:blank") await page.goto(process.env.BASE_URL ?? "http://localhost:5173");
   return page.evaluate(async ({ endpoint, roomId, userId, accessToken, peerId }) => {
     const state = (globalThis as any).__concurrentChaosState ??= { stream: undefined, ws: undefined, pc: undefined };
     state.ws?.close();
