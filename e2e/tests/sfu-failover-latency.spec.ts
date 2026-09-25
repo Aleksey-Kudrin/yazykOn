@@ -36,6 +36,7 @@ test("SFU failover recovery latency is measured end-to-end", async ({ browser })
   await page.goto(primary + "/health");
   await health(primary);
 
+  if (page.url() === "about:blank") await page.goto(process.env.BASE_URL ?? "http://localhost:5173");
   const connected = await page.evaluate(async ({ endpoint, roomId, accessToken }) => {
     const stream = (globalThis as any).__latencyStream as MediaStream | undefined
       ?? await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
