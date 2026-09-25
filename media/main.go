@@ -704,6 +704,12 @@ func main() {
   <-signals
   ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second); defer cancel()
   _ = srv.Shutdown(ctx)
+  // A SIGTERM/SIGINT is also how the failover integration stops a node.
+  // Preserve Redis room/peer/track state so the surviving SFU can reclaim
+  // ownership after the owner TTL instead of observing a graceful-close delete.
+  // Local PeerConnections are still closed below; cluster persistence is simply
+  // detached before that local cleanup runs.
+  clusterShutdown()
   roomsMu.Lock()
   snapshot := make([]*Room, 0, len(rooms)); for _, room := range rooms { snapshot = append(snapshot, room) }
   rooms = map[string]*Room{}
@@ -980,7 +986,16 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		room.mu.Lock()
 		room.tracks[publishedID] = &PublishedTrack{ownerID: id, trackID: track.ID(), sessionID: me.sessionID, local: local}
 		room.mu.Unlock()
-		clusterSaveTrackState(room.id, id, track.ID(), me.sessionID, strings.ToLower(codec.MimeType))
+		kind := ""
+		switch {
+		case strings.HasPrefix(strings.ToLower(codec.MimeType), "video/"):
+			kind = "video"
+		case strings.HasPrefix(strings.ToLower(codec.MimeType), "audio/"):
+			kind = "audio"
+		default:
+			kind = strings.ToLower(codec.MimeType)
+		}
+		clusterSaveTrackState(room.id, id, track.ID(), me.sessionID, kind)
 
 		for _, target := range othersSnapshot(room, id) {
 			if sender, err := target.pc.AddTrack(local); err == nil {
