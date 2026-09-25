@@ -123,8 +123,8 @@ var (
 )
 
 
-func clusterPeerKey(roomID, peerID, sessionID string) string {
-	return "yazykon:sfu:peer:" + roomID + ":" + peerID + ":" + sessionID
+func clusterPeerKey(roomID, peerID string) string {
+	return "yazykon:sfu:peer:" + roomID + ":" + peerID
 }
 
 func clusterNodeKey(nodeID string) string {
@@ -455,7 +455,7 @@ func clusterSync() {
 				"role": role,
 				"updatedAt": time.Now().Unix(),
 			})
-			_ = client.Set(ctx, clusterPeerKey(room.id, peer.id, sessionID), payload, 75*time.Second).Err()
+			_ = client.Set(ctx, clusterPeerKey(room.id, peer.id), payload, 75*time.Second).Err()
 		}
 	}
 }
@@ -479,7 +479,7 @@ func clusterRegisterPeer(peer *Peer) {
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := client.Set(ctx, clusterPeerKey(peer.room.id, peer.id, peer.sessionID), payload, 75*time.Second).Err(); err != nil {
+	if err := client.Set(ctx, clusterPeerKey(peer.room.id, peer.id), payload, 75*time.Second).Err(); err != nil {
 		log.Printf("SFU Redis peer register failed: %v", err)
 	}
 }
@@ -487,13 +487,19 @@ func clusterRegisterPeer(peer *Peer) {
 func clusterRemovePeer(peer *Peer) {
 	clusterMu.RLock()
 	client := clusterRedis
+	nodeID := clusterNodeID
 	clusterMu.RUnlock()
 	if client == nil || !clusterReady.Load() || peer.room == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	_ = client.Del(ctx, clusterPeerKey(peer.room.id, peer.id, peer.sessionID)).Err()
+	const removeScript = `local current = redis.call("GET", KEYS[1])
+if not current then return 0 end
+local ok, obj = pcall(cjson.decode, current)
+if not ok or obj.nodeId ~= ARGV[1] or obj.sessionId ~= ARGV[2] then return 0 end
+return redis.call("DEL", KEYS[1])`
+	_, _ = client.Eval(ctx, removeScript, []string{clusterPeerKey(peer.room.id, peer.id)}, nodeID, peer.sessionID).Result()
 }
 
 func clusterPublish(roomID, eventType, peerID, sessionID string) {
@@ -752,6 +758,8 @@ func replacePeerSession(old *Peer, room *Room) {
 		}
 	}
 	room.mu.Unlock()
+
+	clusterRemovePeer(old)
 
 	for _, track := range removedTrackStates {
 		clusterRemoveTrackState(room.id, track.ownerID, track.trackID, track.sessionID)
