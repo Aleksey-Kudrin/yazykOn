@@ -130,9 +130,11 @@ async function unregisterClient(client: Client): Promise<"removed" | "stale" | "
 }
 
 export function attachSignaling(server: HttpServer) {
+  const maxPayload = Math.max(1024, Math.min(256 * 1024, Number(process.env.WS_MAX_PAYLOAD ?? 64 * 1024) || 64 * 1024));
   const wss = new WebSocketServer({
     server,
     path: "/ws",
+    maxPayload,
     verifyClient: (info: { origin: string; secure: boolean; req: import("node:http").IncomingMessage }) => allowedOrigin(info.origin)
   });
 
