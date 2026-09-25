@@ -19,7 +19,7 @@ type SignalMessage =
   | { type: "offer"; data: RTCSessionDescriptionInit }
   | { type: "answer"; data: RTCSessionDescriptionInit }
   | { type: "ice"; data: RTCIceCandidateInit }
-  | { type: "error"; error?: string; data?: { code?: string } }
+  | { type: "error"; error?: string; data?: { code?: string; endpoint?: string } }
   | { type: "lobby-waiting" }
   | { type: "lobby-join"; peerId: string }
   | { type: "lobby-denied" }
@@ -166,13 +166,15 @@ export function Room({ roomId }: RoomProps) {
         pc.ontrack = (event) => {
           const stream = event.streams[0] ?? new MediaStream([event.track]);
           const id = stream.id || event.track.id;
-          remoteStreams.current.set(id, stream);
+          remoteStreams.current.set(id, stream);\n          remoteTrackStreams.current.set(event.track.id, id);
           if (event.track.kind === "video") {
             event.track.onended = () => {
               const current = remoteStreams.current.get(id);
               if (current) {
                 current.removeTrack(event.track);
                 if (current.getTracks().length === 0) remoteStreams.current.delete(id);
+                remoteOwners.current.delete(event.track.id);
+                remoteTrackStreams.current.delete(event.track.id);
                 setRemotes(Array.from(remoteStreams.current, ([streamId, remote]) => ({ id: streamId, stream: remote })));
               }
             };
@@ -322,6 +324,29 @@ export function Room({ roomId }: RoomProps) {
           if (message.type === "lobby-off") { setLobby(false); setWaitingPeers([]); return; }
           if (message.type === "role-updated") { const data = message.data ?? {}; setParticipants(current => current.map(p => p.userId === data.userId ? { ...p, role: data.role } : p)); setMembers(current => current.map(m => m.id === data.userId ? { ...m, role: data.role as RoomMember["role"] } : m)); return; }
 
+          if (message.type === "track-published") {
+            const trackId = message.data?.trackId;
+            if (trackId) remoteOwners.current.set(trackId, message.peerId);
+            return;
+          }
+          if (message.type === "track-removed") {
+            const trackId = message.data?.trackId;
+            if (trackId) {
+              const streamId = remoteTrackStreams.current.get(trackId);
+              if (streamId) {
+                const remote = remoteStreams.current.get(streamId);
+                if (remote) {
+                  const track = remote.getTracks().find(item => item.id === trackId);
+                  if (track) remote.removeTrack(track);
+                  if (remote.getTracks().length === 0) remoteStreams.current.delete(streamId);
+                }
+              }
+              remoteOwners.current.delete(trackId);
+              remoteTrackStreams.current.delete(trackId);
+              setRemotes(Array.from(remoteStreams.current, ([id, stream]) => ({ id, stream })));
+            }
+            return;
+          }
     if (message.type === "peer-joined") {
             setParticipants(current => upsertParticipant(current, participantFromMeta(message.peerId, message.data)));
             setStatus("Новый участник подключился");
