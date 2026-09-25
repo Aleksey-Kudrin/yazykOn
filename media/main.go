@@ -373,19 +373,27 @@ func clusterInit() func() {
 	clusterMu.Unlock()
 	clusterReady.Store(true)
 	clusterLastSync.Store(time.Now().UnixNano())
+	stopCh := make(chan struct{})
+	var stopOnce sync.Once
 
 	go func() {
 		ticker := time.NewTicker(sfuClusterHeartbeat())
 		defer ticker.Stop()
-		for range ticker.C {
-			clusterSync()
-			clusterRenewOwnedRooms()
+		for {
+			select {
+			case <-ticker.C:
+				clusterSync()
+				clusterRenewOwnedRooms()
+			case <-stopCh:
+				return
+			}
 		}
 	}()
 	clusterSync()
 	log.Printf("SFU shared control plane enabled: node=%s", nodeID)
 
 	return func() {
+		stopOnce.Do(func() { close(stopCh) })
 		clusterReady.Store(false)
 		clusterMu.Lock()
 		client := clusterRedis
