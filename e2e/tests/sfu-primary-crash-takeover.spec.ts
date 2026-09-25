@@ -24,6 +24,12 @@ async function join(endpoint: string, roomId: string, peerId?: string) {
   return { ws, joined: await joined };
 }
 
+async function ownerNode(redis: any, key: string) {
+  const raw = await redis.get(key);
+  if (!raw) return null;
+  try { return JSON.parse(raw)?.nodeId ?? raw; } catch { return raw; }
+}
+
 test("primary crash triggers secondary takeover and stable peer reconnect", async () => {
   test.skip(!process.env.SFU_FAILOVER_LIVE, "Set SFU_FAILOVER_LIVE=1 for the live Docker failover run");
   const { createClient } = await import("redis");
@@ -37,10 +43,10 @@ test("primary crash triggers secondary takeover and stable peer reconnect", asyn
   try {
     first = await join(primary, roomId, peerId);
     expect(first.joined.peerId).toBe(peerId);
-    await expect.poll(() => redis.get(ownerKey), { timeout: 5000 }).toBe("integration-primary");
+    await expect.poll(() => ownerNode(redis, ownerKey), { timeout: 5000 }).toBe("integration-primary");
 
     execFileSync("docker", [...compose, "stop", "sfu-primary"], { stdio: "inherit" });
-    await expect.poll(async () => (await redis.get(ownerKey)), { timeout: 7000, intervals: [250] }).toBe("integration-secondary");
+    await expect.poll(async () => ownerNode(redis, ownerKey), { timeout: 7000, intervals: [250] }).toBe("integration-secondary");
 
     second = await join(secondary, roomId, peerId);
     expect(second.joined.peerId).toBe(peerId);
