@@ -80,7 +80,25 @@ async function connect(page: Page, endpoint: string, roomId: string, userId: str
     };
     for (const track of state.stream.getTracks()) pc.addTrack(track, state.stream);
 
-    const ws = new WebSocket(endpoint.replace(/^http/, "ws") + "/ws");
+    let ws: WebSocket | undefined;
+    let lastWsError: Error | undefined;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        ws = new WebSocket(endpoint.replace(/^http/, "ws") + "/ws");
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error("websocket open timeout")), 5000);
+          ws!.onopen = () => { clearTimeout(timer); resolve(); };
+          ws!.onerror = () => { clearTimeout(timer); reject(new Error("websocket failed")); };
+        });
+        break;
+      } catch (error) {
+        lastWsError = error as Error;
+        try { ws?.close(); } catch {}
+        await new Promise(resolve => setTimeout(resolve, 250 * (attempt + 1)));
+      }
+    }
+    if (!ws) throw lastWsError ?? new Error("websocket failed");
+
     const queue: any[] = [];
     const waiters = new Map<string, ((message: any) => void)[]>();
     const wait = (type: string) => new Promise<any>((resolve, reject) => {
@@ -101,10 +119,6 @@ async function connect(page: Page, endpoint: string, roomId: string, userId: str
       const list = waiters.get(message.type);
       if (list?.length) list.shift()!(message); else queue.push(message);
     };
-    await new Promise<void>((resolve, reject) => {
-      ws.onopen = resolve;
-      ws.onerror = () => reject(new Error("websocket failed"));
-    });
     pc.onicecandidate = event => {
       if (event.candidate && ws.readyState === WebSocket.OPEN)
         ws.send(JSON.stringify({ type: "ice", roomId, data: event.candidate.toJSON() }));
