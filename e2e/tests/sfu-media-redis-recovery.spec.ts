@@ -120,6 +120,7 @@ test("media reconnect converges after Redis control-plane recovery", async ({ br
     await browser.newPage({ permissions: ["camera", "microphone"] }),
     await browser.newPage({ permissions: ["camera", "microphone"] })
   ];
+  await Promise.all(pages.map(page => page.goto(primary + "/health")));
 
   try {
     const first = await connect(pages[0], primary, roomId, "redis-recovery-0");
