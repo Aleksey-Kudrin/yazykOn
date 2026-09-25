@@ -123,6 +123,11 @@ var (
 )
 
 
+func redisJSON(value any) []byte {
+	b, _ := json.Marshal(value)
+	return b
+}
+
 func clusterPeerKey(roomID, peerID string) string {
 	return "yazykon:sfu:peer:" + roomID + ":" + peerID
 }
@@ -164,7 +169,7 @@ func clusterSaveTrackState(roomID, peerID, trackID, sessionID, kind string) {
 	key := clusterRoomTracksKey(roomID)
 	state := clusterTrackState{PeerID: peerID, TrackID: trackID, SessionID: sessionID, Kind: kind, UpdatedAt: time.Now().Unix()}
 	const saveScript = `redis.call("HSET", KEYS[1], ARGV[1], ARGV[2]); return redis.call("PEXPIRE", KEYS[1], ARGV[3])`
-	_, _ = client.Eval(ctx, saveScript, []string{key}, peerID+":"+trackID, mustJSON(state), "90000").Result()
+	_, _ = client.Eval(ctx, saveScript, []string{key}, peerID+":"+trackID, redisJSON(state), "90000").Result()
 }
 
 func clusterRemoveTrackState(roomID, peerID, trackID, sessionID string) {
@@ -230,7 +235,7 @@ func clusterSaveRoomState(room *Room) {
 	room.mu.RUnlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	_ = client.Set(ctx, clusterRoomStateKey(room.id), mustJSON(state), 90*time.Second).Err()
+	_ = client.Set(ctx, clusterRoomStateKey(room.id), redisJSON(state), 90*time.Second).Err()
 }
 
 func clusterLoadRoomState(roomID string) (clusterRoomState, bool) {
@@ -272,7 +277,7 @@ func clusterClaimRoom(roomID string) (bool, string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	key := clusterOwnerKey(roomID)
-	payload := mustJSON(map[string]any{"nodeId": nodeID, "endpoint": clusterNodeEndpoint()})
+	payload := redisJSON(map[string]any{"nodeId": nodeID, "endpoint": clusterNodeEndpoint()})
 	claimed, err := client.SetNX(ctx, key, payload, sfuRoomOwnerTTL()).Result()
 	if err != nil {
 		log.Printf("SFU Redis room claim failed: %v", err)
@@ -312,7 +317,7 @@ func clusterRenewOwnedRooms() {
 	defer cancel()
 	for _, room := range roomSnapshot {
 		key := clusterOwnerKey(room.id)
-		payload := mustJSON(map[string]any{"nodeId": nodeID, "endpoint": clusterNodeEndpoint()})
+		payload := redisJSON(map[string]any{"nodeId": nodeID, "endpoint": clusterNodeEndpoint()})
 		const renewScript = `local current = redis.call("GET", KEYS[1])
 if not current then return 0 end
 local ok, owner = pcall(cjson.decode, current)
@@ -418,7 +423,7 @@ func clusterSync() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	nodePayload := mustJSON(map[string]any{
+	nodePayload := redisJSON(map[string]any{
 		"nodeId": nodeID,
 		"activePeers": activePeers.Load(),
 		"activeRooms": activeRooms.Load(),
@@ -470,7 +475,7 @@ func clusterSync() {
 			if closed {
 				continue
 			}
-			payload := mustJSON(map[string]any{
+			payload := redisJSON(map[string]any{
 				"nodeId": nodeID,
 				"roomId": room.id,
 				"peerId": peer.id,
@@ -503,7 +508,7 @@ func clusterRegisterPeer(peer *Peer) {
 	if closed {
 		return
 	}
-	payload := mustJSON(map[string]any{
+	payload := redisJSON(map[string]any{
 		"nodeId": nodeID,
 		"roomId": roomID,
 		"peerId": peerID,
@@ -545,7 +550,7 @@ func clusterPublish(roomID, eventType, peerID, sessionID string) {
 	if client == nil || !clusterReady.Load() {
 		return
 	}
-	payload := mustJSON(map[string]any{
+	payload := redisJSON(map[string]any{
 		"nodeId": nodeID,
 		"type": eventType,
 		"roomId": roomID,
