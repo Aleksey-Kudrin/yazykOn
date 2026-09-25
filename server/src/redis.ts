@@ -127,7 +127,9 @@ export async function redisRemovePeer(roomId: string, peerId: string, nodeId: st
      return redis.call("DEL", KEYS[1])`,
     { keys: [key], arguments: [nodeId, sessionId] }
   );
-  return Number(result) === 1;
+  const code = Number(result);
+  if (code === 1) return "removed";
+  return "stale";
 }
 
 export async function redisListPeers(roomId: string) {
