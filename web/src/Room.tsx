@@ -7,6 +7,7 @@ import { accessRoom, getRoom, getRoomMembers, getRoomMessages, sendRoomMessage, 
 interface RoomProps { roomId: string; }
 type SignalMessage =
   | { type: "joined"; roomId: string; peerId: string; data?: { peers: string[]; peerMeta?: Record<string, { userId?: string; role?: string }>; tracks?: number; hostId?: string; locked?: boolean; lobby?: boolean } }
+  | { type: "room-snapshot"; roomId: string; peers: string[] }
   | { type: "peer-joined"; peerId: string; data?: { userId?: string; role?: string } }
   | { type: "peer-left"; peerId: string }
   | { type: "role-updated"; data?: { userId?: string; role?: string } }
@@ -303,6 +304,19 @@ export function Room({ roomId }: RoomProps) {
             setWaiting(false);
             setWaitingPeers(current => current.filter(id => id !== message.peerId));
             setStatus("Комната подключена");
+            return;
+          }
+          if (message.type === "room-snapshot") {
+            setParticipants(current => {
+              const selfId = selfIdRef.current;
+              const next = [current.find(participant => participant.peerId === selfId) ?? participantFromMeta(selfId)];
+              for (const peerId of message.peers) {
+                if (peerId === selfId) continue;
+                const existing = current.find(participant => participant.peerId === peerId);
+                next.push(existing ?? participantFromMeta(peerId));
+              }
+              return next;
+            });
             return;
           }
           if (message.type === "lobby-waiting") {
