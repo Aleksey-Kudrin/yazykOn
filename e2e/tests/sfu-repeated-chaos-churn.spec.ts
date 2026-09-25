@@ -124,8 +124,8 @@ async function connect(page: Page, endpoint: string, roomId: string, userId: str
         ws.send(JSON.stringify({ type: "ice", roomId, data: event.candidate.toJSON() }));
     };
     ws.send(JSON.stringify({
-      type: "join", roomId,
-      data: { accessToken, reconnect: Boolean(peerId), ...(peerId ? { peerId } : {}) }
+      type: "join", roomId, ...(peerId ? { peerId } : {}),
+      data: { accessToken, reconnect: Boolean(peerId) }
     }));
     const joined = await wait("joined");
     const offer = await pc.createOffer();
