@@ -3,19 +3,29 @@ import { test, expect } from "@playwright/test";
 const primary = process.env.SFU_PRIMARY_URL ?? "http://127.0.0.1:4100";
 const secondary = process.env.SFU_SECONDARY_URL ?? "http://127.0.0.1:4200";
 const waitMs = Number(process.env.SFU_FAILOVER_WAIT_MS ?? 7000);
+const clusterWaitMs = Number(process.env.SFU_CLUSTER_READY_WAIT_MS ?? 20000);
+
+async function waitForCluster(request: Parameters<typeof test>[0] extends never ? never : any, endpoint: string) {
+  const deadline = Date.now() + clusterWaitMs;
+  let lastBody: any = null;
+  while (Date.now() < deadline) {
+    try {
+      const response = await request.get(new URL("/health", endpoint).toString());
+      if (response.ok()) {
+        lastBody = await response.json();
+        if (lastBody.cluster === true) return lastBody;
+      }
+    } catch {}
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  throw new Error(`cluster readiness timeout: ${endpoint} body=${JSON.stringify(lastBody)}`);
+}
 
 test("two-SFU Redis takeover: primary loss allows secondary ownership", async ({ request }) => {
   test.skip(!process.env.SFU_FAILOVER_LIVE, "Set SFU_FAILOVER_LIVE=1 for the live Docker failover run");
 
-  const a = await request.get(new URL("/health", primary).toString());
-  const b = await request.get(new URL("/health", secondary).toString());
-  expect(a.ok()).toBeTruthy();
-  expect(b.ok()).toBeTruthy();
-
-  const aBody = await a.json();
-  const bBody = await b.json();
-  expect(aBody.cluster).toBeTruthy();
-  expect(bBody.cluster).toBeTruthy();
+  const aBody = await waitForCluster(request, primary);
+  const bBody = await waitForCluster(request, secondary);
   expect(aBody.nodeId).not.toBe(bBody.nodeId);
 
   // The actual browser/media recovery is intentionally kept separate from
