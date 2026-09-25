@@ -748,6 +748,7 @@ func replacePeerSession(old *Peer, room *Room) {
 		return
 	}
 	delete(room.peers, old.id)
+	activePeers.Add(-1)
 	removedTracks := make([]string, 0)
 	removedTrackStates := make([]PublishedTrack, 0)
 	for id, track := range room.tracks {
