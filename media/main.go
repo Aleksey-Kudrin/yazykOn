@@ -607,7 +607,13 @@ func send(p *Peer, msg Signal) error {
 	if p.closed {
 		return nil
 	}
-	return p.conn.WriteJSON(msg)
+	_ = p.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	err := p.conn.WriteJSON(msg)
+	_ = p.conn.SetWriteDeadline(time.Time{})
+	if err != nil {
+		log.Printf("SFU websocket send failed: peer=%s session=%s type=%s err=%v", p.id, p.sessionID, msg.Type, err)
+	}
+	return err
 }
 
 func main() {
