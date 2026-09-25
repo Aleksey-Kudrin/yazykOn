@@ -399,6 +399,20 @@ func clusterInit() func() {
 
 	return func() {
 		stopOnce.Do(func() { close(stopCh) })
+		// Release ownership, but intentionally keep room/peer/track snapshots.
+		// The next SFU can claim the room immediately while reconstructing state
+		// from Redis instead of waiting for the owner TTL or losing the snapshot.
+		if clusterReady.Load() {
+			roomsMu.RLock()
+			roomSnapshot := make([]*Room, 0, len(rooms))
+			for _, room := range rooms {
+				roomSnapshot = append(roomSnapshot, room)
+			}
+			roomsMu.RUnlock()
+			for _, room := range roomSnapshot {
+				clusterReleaseRoom(room.id)
+			}
+		}
 		clusterReady.Store(false)
 		clusterMu.Lock()
 		client := clusterRedis
