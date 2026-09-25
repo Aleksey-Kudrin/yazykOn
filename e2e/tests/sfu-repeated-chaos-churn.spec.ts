@@ -3,6 +3,43 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { test, expect, type Page } from "@playwright/test";
+import { waitForClusterReady } from "./helpers/sfu-health";
+
+const primary = process.env.SFU_PRIMARY_URL ?? "http://127.0.0.1:4100";
+const secondary = process.env.SFU_SECONDARY_URL ?? "http://127.0.0.1:4200";
+const compose = process.env.SFU_FAILOVER_COMPOSE ?? "e2e/docker-compose.sfu-failover.yml";
+const redisUrl = process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
+const secret = process.env.ROOM_ACCESS_SECRET ?? "integration-secret";
+const ttlMs = Number(process.env.SFU_ROOM_OWNER_TTL_MS ?? 3000);
+const cycles = Math.min(5, Math.max(2, Number(process.env.SFU_CHAOS_CYCLES ?? 3)));
+const members = 3;
+
+function accessToken(roomId: string, userId: string) {
+  const payload = Buffer.from(JSON.stringify({
+    roomId, userId, role: userId.endsWith("-0") ? "host" : "participant",
+    exp: Math.floor(Date.now() / 1000) + 900
+  })).toString("base64url");
+  return payload + "." + createHmac("sha256", secret).update(payload).digest("base64url");
+}
+
+async function redisState(roomId: string) {
+  const { createClient } = await import("redis");
+  const client = createClient({ url: redisUrl });
+  await client.connect();
+  const ownerRaw = await client.get("yazykon:sfu:owner:" + roomId);
+  const state = await client.exists("yazykon:sfu:state:" + roomId);
+  const tracks = await client.exists("yazykon:sfu:tracks:" + roomId);
+  const peers = await client.keys("yazykon:sfu:peer:" + roomId + ":*");
+  await client.quit();
+  return { owner: ownerRaw ? JSON.parse(ownerRaw) : null, state, tracks, peerCount: peers.length, peerKeys: peers.sort() };
+}
+
+mport { createHmac } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { test, expect, type Page } from "@playwright/test";
+import { waitForClusterReady } from "./helpers/sfu-health";
 
 const primary = process.env.SFU_PRIMARY_URL ?? "http://127.0.0.1:4100";
 const secondary = process.env.SFU_SECONDARY_URL ?? "http://127.0.0.1:4200";
@@ -169,7 +206,7 @@ async function connect(page: Page, endpoint: string, roomId: string, userId: str
 test("repeated SFU failover churn preserves peer identity and cleans replaced tracks", async ({ browser }) => {
   test.setTimeout(Math.max(300000, (cycles * 60000) + 120000));
   test.skip(!process.env.SFU_FAILOVER_LIVE, "Set SFU_FAILOVER_LIVE=1 for the live Docker run");
-  await Promise.all([waitHealth(primary), waitHealth(secondary)]);
+  await Promise.all([waitForClusterReady(primary), waitForClusterReady(secondary)]);
 
   const roomId = "REPEATED-CHAOS-" + Date.now();
   const pages: Page[] = [];
@@ -206,7 +243,7 @@ test("repeated SFU failover churn preserves peer identity and cleans replaced tr
       const takeover = await redisState(roomId);
       expect(takeover.owner?.nodeId).toBe(cycle % 2 === 0 ? "integration-secondary" : "integration-primary");
 
-      await waitHealth(to, true);
+      await waitForClusterReady(to);
       const recovered = [] as Awaited<ReturnType<typeof connect>>[];
       for (let index = 0; index < participants.length; index++) {
         const p = participants[index];
@@ -230,7 +267,7 @@ test("repeated SFU failover churn preserves peer identity and cleans replaced tr
       cyclesReport.push({ cycle, from, to, takeover, state });
 
       execFileSync("docker", ["compose", "-f", compose, "start", cycle % 2 === 0 ? "sfu-primary" : "sfu-secondary"], { stdio: "inherit" });
-      await waitHealth(from, true);
+      await waitForClusterReady(from);
     }
 
     await Promise.all(pages.map(p => p.close()));
