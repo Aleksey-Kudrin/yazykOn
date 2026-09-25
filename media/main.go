@@ -868,7 +868,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 	claimed, ownerEndpoint := clusterClaimRoom(roomID)
 	if !claimed {
 		_ = pc.Close()
-		data := mustJSON(map[string]string{"code": "ROOM_OWNED", "endpoint": ownerEndpoint})
+		data := mustJSON(map[string]string{"code": "SFU_ROOM_OWNER", "endpoint": ownerEndpoint})
 		_ = conn.WriteJSON(Signal{Type: "error", Data: data})
 		return
 	}
