@@ -39,7 +39,7 @@ test("browser WebRTC media survives SFU A loss and republishes on SFU B", async 
     permissions: ["camera", "microphone"],
     javaScriptEnabled: true
   });
-  await page.goto(primary + "/health");
+  await page.goto(process.env.BASE_URL ?? "http://localhost:5173");
   await page.context().grantPermissions(["camera", "microphone"]);
 
   const authToken = token();
