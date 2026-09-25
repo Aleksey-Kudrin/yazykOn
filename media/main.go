@@ -865,7 +865,23 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		_ = conn.WriteJSON(Signal{Type: "error", Data: mustJSON(map[string]string{"code": "INVALID_ROOM_ID"})})
 		return
 	}
+	claimed, ownerEndpoint := clusterClaimRoom(roomID)
+	if !claimed {
+		_ = pc.Close()
+		data := mustJSON(map[string]string{"code": "ROOM_OWNED", "endpoint": ownerEndpoint})
+		_ = conn.WriteJSON(Signal{Type: "error", Data: data})
+		return
+	}
 	room := getRoom(roomID)
+	if state, ok := clusterLoadRoomState(roomID); ok {
+		room.mu.Lock()
+		if len(room.peers) == 0 {
+			room.hostID = state.HostID
+			room.locked = state.Locked
+			room.lobby = state.Lobby
+		}
+		room.mu.Unlock()
+	}
 	room.mu.RLock()
 	existing := room.peers[id]
 	room.mu.RUnlock()
@@ -917,6 +933,8 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		tracks = append(tracks, t)
 	}
 	room.mu.Unlock()
+	clusterRegisterPeer(me)
+	clusterSaveRoomState(room)
 
 	pc.OnICECandidate(func(c *webrtc.ICECandidate) {
 		if c == nil {
@@ -1255,9 +1273,11 @@ func removePeer(p *Peer) {
 	delete(p.room.peers, p.id)
 	activePeers.Add(-1)
 	removedTracks := make([]string, 0)
+	removedTrackStates := make([]PublishedTrack, 0)
 	for id, t := range p.room.tracks {
 		if t.ownerID == p.id {
 			removedTracks = append(removedTracks, id)
+			removedTrackStates = append(removedTrackStates, *t)
 			delete(p.room.tracks, id)
 		}
 	}
@@ -1280,6 +1300,17 @@ func removePeer(p *Peer) {
 	}
 	empty := len(p.room.peers) == 0
 	p.room.mu.Unlock()
+	clusterRemovePeer(p)
+	for _, track := range removedTrackStates {
+		clusterRemoveTrackState(p.room.id, track.ownerID, track.trackID, track.sessionID)
+	}
+	if empty {
+		clusterReleaseRoom(p.room.id)
+		clusterDeleteRoomState(p.room.id)
+		clusterDeleteTrackState(p.room.id)
+	} else {
+		clusterSaveRoomState(p.room)
+	}
 
 	for _, other := range remaining {
 		for _, publishedID := range removedTracks {
