@@ -48,6 +48,7 @@ async function waitHealth(endpoint: string, expected = true) {
 }
 
 async function connect(page: Page, endpoint: string, roomId: string, userId: string, peerId = "", replaceTrack = false) {
+  if (page.url() === "about:blank") await page.goto(process.env.BASE_URL ?? "http://localhost:5173");
   return page.evaluate(async ({ endpoint, roomId, userId, accessToken, peerId, replaceTrack }) => {
     const state = (globalThis as any).__repeatedChaos ??= { stream: undefined, ws: undefined, pc: undefined };
     state.ws?.close();
