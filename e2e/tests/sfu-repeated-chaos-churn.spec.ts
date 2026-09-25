@@ -145,6 +145,7 @@ async function connect(page: Page, endpoint: string, roomId: string, userId: str
 }
 
 test("repeated SFU failover churn preserves peer identity and cleans replaced tracks", async ({ browser }) => {
+  test.setTimeout(Math.max(120000, (cycles * 30000) + 60000));
   test.skip(!process.env.SFU_FAILOVER_LIVE, "Set SFU_FAILOVER_LIVE=1 for the live Docker run");
   await Promise.all([waitHealth(primary), waitHealth(secondary)]);
 
