@@ -40,8 +40,9 @@ func init() {
 func clusterRedisAvailable() bool {
 	clusterMu.RLock()
 	client := clusterRedis
+	ready := clusterReady.Load()
 	clusterMu.RUnlock()
-	return client != nil
+	return client != nil && ready
 }
 
 func startRetryHeartbeat() {
