@@ -413,7 +413,7 @@ func clusterSync() {
 	client := clusterRedis
 	nodeID := clusterNodeID
 	clusterMu.RUnlock()
-	if client == nil || !clusterReady.Load() {
+	if client == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
