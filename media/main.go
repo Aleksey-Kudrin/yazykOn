@@ -474,21 +474,32 @@ func clusterRegisterPeer(peer *Peer) {
 	client := clusterRedis
 	nodeID := clusterNodeID
 	clusterMu.RUnlock()
-	if client == nil || !clusterReady.Load() {
+	if client == nil || !clusterReady.Load() || peer == nil || peer.room == nil {
+		return
+	}
+	peer.mu.Lock()
+	closed := peer.closed
+	roomID := peer.room.id
+	peerID := peer.id
+	sessionID := peer.sessionID
+	userID := peer.userID
+	role := peer.role
+	peer.mu.Unlock()
+	if closed {
 		return
 	}
 	payload := mustJSON(map[string]any{
 		"nodeId": nodeID,
-		"roomId": peer.room.id,
-		"peerId": peer.id,
-		"sessionId": peer.sessionID,
-		"userId": peer.userID,
-		"role": peer.role,
+		"roomId": roomID,
+		"peerId": peerID,
+		"sessionId": sessionID,
+		"userId": userID,
+		"role": role,
 		"updatedAt": time.Now().Unix(),
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if err := client.Set(ctx, clusterPeerKey(peer.room.id, peer.id), payload, 75*time.Second).Err(); err != nil {
+	if err := client.Set(ctx, clusterPeerKey(roomID, peerID), payload, 75*time.Second).Err(); err != nil {
 		log.Printf("SFU Redis peer register failed: %v", err)
 	}
 }
@@ -594,6 +605,12 @@ func getRoom(id string) *Room {
 	return r
 }
 
+func findRoom(id string) *Room {
+	roomsMu.RLock()
+	defer roomsMu.RUnlock()
+	return rooms[id]
+}
+
 func verifyRoomAccessToken(roomID, token string) (AccessClaims, bool) {
   var claims AccessClaims
   secret := os.Getenv("ROOM_ACCESS_SECRET")
@@ -697,7 +714,8 @@ func handleRoleControl(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	room := getRoom(update.RoomID)
+	room := findRoom(update.RoomID)
+	if room == nil { w.WriteHeader(http.StatusNotFound); return }
 	room.mu.RLock()
 	var target *Peer
 	peers := make([]*Peer, 0, len(room.peers))
@@ -711,6 +729,7 @@ func handleRoleControl(w http.ResponseWriter, r *http.Request) {
 	if target.role != "host" { target.role = update.Role }
 	newRole := target.role
 	target.mu.Unlock()
+	clusterRegisterPeer(target)
 	payload := mustJSON(map[string]string{"userId": target.userID, "role": newRole})
 	for _, p := range peers { _ = send(p, Signal{Type: "role-updated", PeerID: target.id, Data: payload}) }
 	w.Header().Set("Content-Type", "application/json")
@@ -730,7 +749,8 @@ func handleChatControl(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
 	}
-	room := getRoom(roomID)
+	room := findRoom(roomID)
+	if room == nil { w.WriteHeader(http.StatusNotFound); return }
 	room.mu.RLock()
 	peers := make([]*Peer, 0, len(room.peers))
 	for _, p := range room.peers { if !p.waiting { peers = append(peers, p) } }
