@@ -170,30 +170,41 @@ export function attachSignaling(server: HttpServer) {
         client = { socket, roomId, peerId, sessionId: randomUUID(), replaced: false };
         room.set(peerId, client);
 
-        void (async () => {
-          const previous = await registerClient(client!);
-          if (previous && previous.sessionId !== client!.sessionId) {
-            await publishRoomEvent(roomId, {
-              type: "peer-replaced",
-              peerId,
-              targetNodeId: previous.nodeId,
-              targetSessionId: previous.sessionId
-            });
-          }
-          const clusterPeers = redisEnabled() ? await redisListPeers(roomId) : [];
-          const existingPeers = new Set([...room.keys()]);
-          for (const peer of clusterPeers) existingPeers.add(peer.peerId);
-          existingPeers.delete(peerId);
+        // Complete the local handshake before touching Redis. Redis is shared
+        // infrastructure and must not be allowed to hold the WebSocket join open.
+        const localPeers = [...room.keys()].filter(id => id !== peerId);
+        send(socket, { type: "joined", roomId, peerId, peers: localPeers });
+        for (const other of room.values()) {
+          if (other.peerId !== peerId) send(other.socket, { type: "peer-joined", peerId });
+        }
 
-          send(socket, { type: "joined", roomId, peerId, peers: [...existingPeers] });
-          for (const other of room.values()) {
-            if (other.peerId !== peerId) send(other.socket, { type: "peer-joined", peerId });
+        void (async () => {
+          try {
+            const previous = await registerClient(client!);
+            if (previous && previous.sessionId !== client!.sessionId) {
+              await publishRoomEvent(roomId, {
+                type: "peer-replaced",
+                peerId,
+                targetNodeId: previous.nodeId,
+                targetSessionId: previous.sessionId
+              });
+            }
+
+            const clusterPeers = redisEnabled() ? await redisListPeers(roomId) : [];
+            const existingPeers = new Set([...room.keys()]);
+            for (const peer of clusterPeers) existingPeers.add(peer.peerId);
+            existingPeers.delete(peerId);
+
+            // Reconcile remote state after the subscription is established. This
+            // also covers events that may have raced the initial local handshake.
+            send(socket, { type: "room-snapshot", roomId, peers: [...existingPeers] });
+            await publishRoomEvent(roomId, { type: "peer-joined", peerId });
+          } catch (error) {
+            // The client is already joined locally. Redis failure is therefore
+            // degraded cluster state, not a failed WebSocket handshake.
+            console.error("signaling cluster sync failed", error);
           }
-          await publishRoomEvent(roomId, { type: "peer-joined", peerId });
-        })().catch(error => {
-          console.error("signaling join failed", error);
-          send(socket, { type: "error", error: "SIGNALING_JOIN_FAILED" });
-        });
+        })();
         return;
       }
 
