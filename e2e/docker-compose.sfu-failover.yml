@@ -1,0 +1,41 @@
+services:
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+
+  sfu-primary:
+    build:
+      context: ../media
+    environment:
+      REDIS_URL: redis://redis:6379
+      INSTANCE_ID: integration-primary
+      SFU_WS_URL: ws://127.0.0.1:4100
+      ROOM_ACCESS_SECRET: integration-secret
+      WEB_ORIGINS: http://localhost:5173
+    ports:
+      - "4100:4000/tcp"
+      - "51000-51100:50000-50100/udp"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  sfu-secondary:
+    build:
+      context: ../media
+    environment:
+      REDIS_URL: redis://redis:6379
+      INSTANCE_ID: integration-secondary
+      SFU_WS_URL: ws://127.0.0.1:4200
+      ROOM_ACCESS_SECRET: integration-secret
+      WEB_ORIGINS: http://localhost:5173
+    ports:
+      - "4200:4000/tcp"
+      - "52000-52100:50000-50100/udp"
+    depends_on:
+      redis:
+        condition: service_healthy
