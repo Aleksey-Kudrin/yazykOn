@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -14,6 +15,8 @@ import (
 // at process startup. In Compose/chaos runs Redis can legitimately become ready
 // a little later, so keep a small supervisor that restores the control plane
 // without requiring an SFU restart.
+var retryHeartbeatStarted atomic.Bool
+
 func init() {
 	if strings.TrimSpace(os.Getenv("REDIS_URL")) == "" {
 		return
@@ -28,6 +31,7 @@ func init() {
 			}
 			if clusterReconnectOnce() {
 				clusterSync()
+				startRetryHeartbeat()
 			}
 		}
 	}()
@@ -38,6 +42,20 @@ func clusterRedisAvailable() bool {
 	client := clusterRedis
 	clusterMu.RUnlock()
 	return client != nil
+}
+
+func startRetryHeartbeat() {
+	if !retryHeartbeatStarted.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		ticker := time.NewTicker(sfuClusterHeartbeat())
+		defer ticker.Stop()
+		for range ticker.C {
+			clusterSync()
+			clusterRenewOwnedRooms()
+		}
+	}()
 }
 
 func clusterReconnectOnce() bool {
