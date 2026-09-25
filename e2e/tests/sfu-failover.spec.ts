@@ -1,4 +1,11 @@
-import { test, expect, type APIRequestContext } from "@playwright/test";
+import { test, expect } from "@playwright/test";
+import { waitForClusterReady } from "./helpers/sfu-health";
+
+const primary = process.env.SFU_PRIMARY_URL ?? "http://127.0.0.1:4100";
+const secondary = process.env.SFU_SECONDARY_URL ?? "http://127.0.0.1:4200";
+const waitMs = Number(process.env.SFU_FAILOVER_WAIT_MS ?? 7000);
+import { test, expect } from "@playwright/test";
+import { waitForClusterReady } from "./helpers/sfu-health";
 
 const primary = process.env.SFU_PRIMARY_URL ?? "http://127.0.0.1:4100";
 const secondary = process.env.SFU_SECONDARY_URL ?? "http://127.0.0.1:4200";
