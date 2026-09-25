@@ -22,6 +22,12 @@ async function join(endpoint: string, roomId: string, peerId?: string) {
   return ws;
 }
 
+async function ownerNode(redis: any, key: string) {
+  const raw = await redis.get(key);
+  if (!raw) return null;
+  try { return JSON.parse(raw)?.nodeId ?? raw; } catch { return raw; }
+}
+
 test("cross-node reconnect preserves peer identity and Redis ownership", async () => {
   test.skip(!process.env.SFU_FAILOVER_LIVE, "Set SFU_FAILOVER_LIVE=1 for the live Docker run");
   const { createClient } = await import("redis");
@@ -32,11 +38,11 @@ test("cross-node reconnect preserves peer identity and Redis ownership", async (
   let ws = await join(primary, roomId, peerId);
   const ownerKey = `yazykon:sfu:owner:${roomId}`;
   try {
-    await expect.poll(() => redis.get(ownerKey), { timeout: 5000 }).toBe("integration-primary");
+    await expect.poll(() => ownerNode(redis, ownerKey), { timeout: 5000 }).toBe("integration-primary");
     ws.close();
     await new Promise(resolve => setTimeout(resolve, 100));
     ws = await join(secondary, roomId, peerId);
-    await expect.poll(() => redis.get(ownerKey), { timeout: 7000 }).toBe("integration-primary");
+    await expect.poll(() => ownerNode(redis, ownerKey), { timeout: 7000 }).toBe("integration-primary");
     expect(ws.readyState).toBe(WebSocket.OPEN);
   } finally {
     ws.close();
