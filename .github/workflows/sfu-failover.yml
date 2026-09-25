@@ -128,11 +128,16 @@ jobs:
             docker compose -p yazykon-sfu-it -f docker-compose.sfu-failover.yml up -d --build
             ready=0
             for i in $(seq 1 60); do
-              if curl -fsS http://127.0.0.1:4100/health >/dev/null && curl -fsS http://127.0.0.1:4200/health >/dev/null; then ready=1; break; fi
+              primary_cluster=$(curl -fsS http://127.0.0.1:4100/health 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).cluster===true?"1":"0")}catch{process.stdout.write("0")}})' || echo 0)
+              secondary_cluster=$(curl -fsS http://127.0.0.1:4200/health 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).cluster===true?"1":"0")}catch{process.stdout.write("0")}})' || echo 0)
+              if [ "$primary_cluster" = "1" ] && [ "$secondary_cluster" = "1" ]; then ready=1; break; fi
               sleep 1
             done
             if [ "$ready" -ne 1 ]; then
-              echo "SFU infrastructure failed to become ready for $spec"
+              echo "SFU cluster infrastructure failed to become ready for $spec"
+              curl -fsS http://127.0.0.1:4100/health || true
+              curl -fsS http://127.0.0.1:4200/health || true
+              docker compose -p yazykon-sfu-it -f docker-compose.sfu-failover.yml logs --no-color --tail=200 || true
               failed=1
               continue
             fi
