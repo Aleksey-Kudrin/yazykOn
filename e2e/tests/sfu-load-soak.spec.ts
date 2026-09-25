@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { test, expect } from "@playwright/test";
+import { waitForClusterReady } from "./helpers/sfu-health";
 
 const primary = process.env.SFU_PRIMARY_URL ?? "http://127.0.0.1:4100";
 const secondary = process.env.SFU_SECONDARY_URL ?? "http://127.0.0.1:4200";
@@ -14,6 +15,7 @@ test("SFU load soak: concurrent participants reconnect repeatedly", async ({ bro
   const pages = await Promise.all(
     Array.from({ length: participants }, () => browser.newPage({ permissions: ["camera", "microphone"] }))
   );
+  await Promise.all([waitForClusterReady(primary), waitForClusterReady(secondary)]);
   await Promise.all(pages.map(page => page.goto(primary + "/health")));
 
   const results = await Promise.all(pages.map(async (page, index) => {
@@ -71,13 +73,7 @@ test("SFU load soak: concurrent participants reconnect repeatedly", async ({ bro
     }
   }
 
-  const health = await Promise.all([primary, secondary].map(async endpoint => {
-    const response = await fetch(endpoint + "/health");
-    expect(response.ok).toBeTruthy();
-    return response.json();
-  }));
-  expect(health[0].cluster).toBeTruthy();
-  expect(health[1].cluster).toBeTruthy();
+  const health = await Promise.all([waitForClusterReady(primary), waitForClusterReady(secondary)]);
   expect(health[0].nodeId).not.toBe(health[1].nodeId);
 
   await Promise.all(pages.map(page => page.evaluate(() => {
