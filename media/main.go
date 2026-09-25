@@ -866,6 +866,12 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	room := getRoom(roomID)
+	room.mu.RLock()
+	existing := room.peers[id]
+	room.mu.RUnlock()
+	if existing != nil {
+		replacePeerSession(existing, room)
+	}
 	room.mu.Lock()
 	if _, exists := room.peers[id]; exists {
 		room.mu.Unlock()
@@ -893,7 +899,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	room.mu.Unlock()
-	me := &Peer{id: id, userID: claims.UserID, role: claims.Role, room: room, conn: conn, pc: pc, published: make(map[string]*webrtc.TrackLocalStaticRTP), subscriptions: make(map[string]*webrtc.RTPSender)}
+	me := &Peer{id: id, sessionID: newID(), userID: claims.UserID, role: claims.Role, room: room, conn: conn, pc: pc, published: make(map[string]*webrtc.TrackLocalStaticRTP), subscriptions: make(map[string]*webrtc.RTPSender)}
 
 	room.mu.Lock()
 	me.waiting = room.lobby && claims.Role != "host" && claims.Role != "cohost"
@@ -932,8 +938,9 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 
 		publishedID := id + ":" + track.ID()
 		room.mu.Lock()
-		room.tracks[publishedID] = &PublishedTrack{ownerID: id, trackID: track.ID(), local: local}
+		room.tracks[publishedID] = &PublishedTrack{ownerID: id, trackID: track.ID(), sessionID: me.sessionID, local: local}
 		room.mu.Unlock()
+		clusterSaveTrackState(room.id, id, track.ID(), me.sessionID, strings.ToLower(codec.MimeType))
 
 		for _, target := range othersSnapshot(room, id) {
 			if sender, err := target.pc.AddTrack(local); err == nil {
@@ -1330,6 +1337,7 @@ func removePublication(room *Room, publishedID string) {
 			renegotiate(target)
 		}
 	}
+	clusterRemoveTrackState(room.id, published.ownerID, published.trackID, published.sessionID)
 }
 
 func mustJSON(value any) json.RawMessage {
