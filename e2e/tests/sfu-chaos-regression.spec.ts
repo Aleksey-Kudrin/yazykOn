@@ -214,7 +214,7 @@ test("SFU chaos regression keeps recovery latency and resource state bounded", a
       slaMs,
       resources: { before: resourceBefore, after: resourceAfter, delta: resourceDelta },
       budgets: {
-        maxActivePeerDelta,
+        maxActiveDelta,
         maxRoomDelta,
         maxTrackDelta,
         maxResourceGrowth,
