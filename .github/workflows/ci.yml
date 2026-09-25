@@ -17,6 +17,7 @@ jobs:
         with:
           node-version: 22
       - run: npm install
+      - run: npm test
       - run: npm run build
 
   web:
@@ -44,4 +45,5 @@ jobs:
           go-version: "1.24"
       - run: go mod tidy
       - run: go test ./...
+      - run: go test -race ./...
       - run: go build ./...
