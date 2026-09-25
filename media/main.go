@@ -118,7 +118,7 @@ var (
 		}
 		return false
 	}}
-	roomsMu  sync.Mutex
+	roomsMu  sync.RWMutex
 	rooms    = map[string]*Room{}
 )
 
