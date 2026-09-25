@@ -33,7 +33,8 @@ function mediaUrls() {
   return values.map(value => {
     const url = new URL(value, window.location.origin);
     const basePath = url.pathname.replace(/\/$/, "");
-    return `${url.protocol === "https:" ? "wss:" : "ws:"}//${url.host}${basePath}/ws`;
+    const wsProtocol = url.protocol === "https:" || url.protocol === "wss:" ? "wss:" : "ws:";
+    return `${wsProtocol}//${url.host}${basePath}/ws`;
   });
 }
 
