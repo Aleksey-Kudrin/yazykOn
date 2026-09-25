@@ -155,6 +155,9 @@ test("concurrent SFU crash plus Redis outage converges without ghost media state
     for (const roomId of rooms) {
       for (let member = 0; member < members; member++) {
         const page = await browser.newPage({ permissions: ["camera", "microphone"] });
+        // getUserMedia is only exposed in a secure/trusted browsing context.
+        // Opening the health endpoint first also makes this deterministic in headless CI.
+        await page.goto(primary + "/health");
         pages.push(page);
         participants.push({ page, roomId, userId: roomId + "-user-" + member, peerId: "", trackIds: [] });
       }
