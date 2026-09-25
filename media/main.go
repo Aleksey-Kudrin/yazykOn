@@ -426,8 +426,13 @@ func clusterSync() {
 	})
 	if err := client.Set(ctx, clusterNodeKey(nodeID), nodePayload, 25*time.Second).Err(); err != nil {
 		log.Printf("SFU Redis node heartbeat failed: %v", err)
+		clusterReady.Store(false)
+		clusterLastSync.Store(0)
 		return
 	}
+	// go-redis reconnects automatically after transient Redis failures. Mark the
+	// control plane healthy again only after a successful heartbeat.
+	clusterReady.Store(true)
 	clusterLastSync.Store(time.Now().UnixNano())
 
 	roomsMu.Lock()
