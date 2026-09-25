@@ -210,3 +210,13 @@ func TestSFURoomOwnerSettingsAreBounded(t *testing.T) {
 		t.Fatalf("too-short heartbeat = %v, want default", got)
 	}
 }
+
+
+func TestClusterInitShutdownStopsWithoutRedisURL(t *testing.T) {
+	t.Setenv("REDIS_URL", "")
+	stop := clusterInit()
+	stop()
+	if clusterReady.Load() {
+		t.Fatal("cluster should not be ready without REDIS_URL")
+	}
+}
