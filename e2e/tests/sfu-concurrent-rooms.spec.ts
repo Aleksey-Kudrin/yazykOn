@@ -52,9 +52,10 @@ async function join(page: import("@playwright/test").Page, roomId: string, userI
     await pc.setLocalDescription(offer);
     ws.send(JSON.stringify({ type: "offer", roomId, data: pc.localDescription }));
     await next("answer");
-    expect(["connected", "connecting", "completed"].includes(pc.connectionState) || ["connected", "completed"].includes(pc.iceConnectionState)).toBeTruthy();
+    const connectionState = pc.connectionState;
+    const iceConnectionState = pc.iceConnectionState;
     await new Promise(resolve => setTimeout(resolve, 800));
-    return { peerId: joined.peerId, remoteTracks, peers: joined.data?.peers ?? [] };
+    return { peerId: joined.peerId, remoteTracks, peers: joined.data?.peers ?? [], connectionState, iceConnectionState };
   }, { endpoint: primary, roomId, accessToken: token(roomId, userId) });
 }
 
@@ -80,6 +81,8 @@ test("concurrent rooms isolate peer state and remote media", async ({ browser })
     for (let i = 1; i < room.length; i++) {
       expect(room[i].peers).toContain(room[0].peerId);
       expect(room[i].remoteTracks).toBeGreaterThan(0);
+      expect(["connected", "connecting", "completed"].includes(room[i].connectionState)
+        || ["connected", "completed"].includes(room[i].iceConnectionState)).toBeTruthy();
     }
   }
 
