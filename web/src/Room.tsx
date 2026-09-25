@@ -201,7 +201,6 @@ export function Room({ roomId }: RoomProps) {
               if (stopped || generation !== connectionGeneration.current || peer.current !== pc) return;
               if (socket.current?.readyState !== WebSocket.OPEN) return;
               if (pc.signalingState !== "stable" || makingOffer.current) return;
-              if (pc.signalingState !== "stable" || makingOffer.current) return;
               iceRestarting.current = true;
               makingOffer.current = true;
               void pc.createOffer({ iceRestart: true }).then(async offer => {
