@@ -220,3 +220,34 @@ func TestClusterInitShutdownStopsWithoutRedisURL(t *testing.T) {
 		t.Fatal("cluster should not be ready without REDIS_URL")
 	}
 }
+
+
+func TestFindRoomDoesNotCreatePhantomRoom(t *testing.T) {
+	roomsMu.Lock()
+	previousRooms := rooms
+	rooms = make(map[string]*Room)
+	activeRooms.Store(0)
+	roomsMu.Unlock()
+	t.Cleanup(func() {
+		roomsMu.Lock()
+		rooms = previousRooms
+		roomsMu.Unlock()
+		activeRooms.Store(0)
+	})
+
+	if got := findRoom("missing-room"); got != nil {
+		t.Fatal("findRoom returned a room for a missing ID")
+	}
+	if got := activeRooms.Load(); got != 0 {
+		t.Fatalf("active rooms = %d, want 0", got)
+	}
+	if got := getRoom("existing-room"); got == nil {
+		t.Fatal("getRoom returned nil")
+	}
+	if got := findRoom("existing-room"); got == nil {
+		t.Fatal("findRoom did not find an existing room")
+	}
+	if got := activeRooms.Load(); got != 1 {
+		t.Fatalf("active rooms = %d, want 1", got)
+	}
+}
