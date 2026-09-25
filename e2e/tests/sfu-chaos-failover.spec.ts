@@ -59,6 +59,7 @@ test("chaos: repeated reconnect plus simultaneous SFU/Redis outage preserves med
   await page.context().grantPermissions(["camera", "microphone"]);
 
   const authToken = token();
+  if (page.url() === "about:blank") await page.goto(process.env.BASE_URL ?? "http://localhost:5173");
   const connected = await page.evaluate(async ({ primary, roomId, authToken }) => {
     const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
     (window as any).__chaosStream = stream;
