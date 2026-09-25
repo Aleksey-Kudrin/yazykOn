@@ -428,6 +428,16 @@ func clusterSync() {
 		log.Printf("SFU Redis node heartbeat failed: %v", err)
 		clusterReady.Store(false)
 		clusterLastSync.Store(0)
+		// A go-redis client can remain non-nil after a connection failure while
+		// its reconnect loop is no longer usable for the control-plane lifecycle.
+		// Detach the failed client so cluster_retry.go can establish a fresh
+		// connection instead of treating the dead client as healthy.
+		clusterMu.Lock()
+		if clusterRedis == client {
+			clusterRedis = nil
+		}
+		clusterMu.Unlock()
+		_ = client.Close()
 		return
 	}
 	// go-redis reconnects automatically after transient Redis failures. Mark the
