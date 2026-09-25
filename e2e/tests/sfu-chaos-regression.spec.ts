@@ -51,6 +51,7 @@ async function waitHealth(endpoint: string) {
 }
 
 async function join(page: import("@playwright/test").Page, endpoint: string, roomId: string, peerId?: string): Promise<Connection> {
+  if (page.url() === "about:blank") await page.goto(process.env.BASE_URL ?? "http://localhost:5173");
   return page.evaluate(async ({ endpoint, roomId, accessToken, peerId }) => {
     const store = (globalThis as any).__sfuRegressionConnections ??= new Map();
     const connectionId = crypto.randomUUID();
