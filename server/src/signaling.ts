@@ -25,6 +25,7 @@ interface Client {
   peerId: string;
   sessionId: string;
   replaced: boolean;
+  closed: boolean;
 }
 
 interface SignalMessage {
@@ -167,7 +168,7 @@ export function attachSignaling(server: HttpServer) {
           existing.socket.close(4001, "session-replaced");
         }
 
-        client = { socket, roomId, peerId, sessionId: randomUUID(), replaced: false };
+        client = { socket, roomId, peerId, sessionId: randomUUID(), replaced: false, closed: false };
         room.set(peerId, client);
 
         // Complete the local handshake before touching Redis. Redis is shared
@@ -180,7 +181,12 @@ export function attachSignaling(server: HttpServer) {
 
         void (async () => {
           try {
+            if (client!.closed || client!.replaced || room.get(peerId) !== client) return;
             const previous = await registerClient(client!);
+            if (client!.closed || client!.replaced || room.get(peerId) !== client) {
+              await unregisterClient(client!);
+              return;
+            }
             if (previous && previous.sessionId !== client!.sessionId) {
               await publishRoomEvent(roomId, {
                 type: "peer-replaced",
@@ -191,6 +197,10 @@ export function attachSignaling(server: HttpServer) {
             }
 
             const clusterPeers = redisEnabled() ? await redisListPeers(roomId) : [];
+            if (client!.closed || client!.replaced || room.get(peerId) !== client) {
+              await unregisterClient(client!);
+              return;
+            }
             const existingPeers = new Set([...room.keys()]);
             for (const peer of clusterPeers) existingPeers.add(peer.peerId);
             existingPeers.delete(peerId);
@@ -239,6 +249,7 @@ export function attachSignaling(server: HttpServer) {
 
     socket.on("close", () => {
       if (!client) return;
+      client.closed = true;
       const current = rooms.get(client.roomId);
       if (current?.get(client.peerId) !== client) {
         void unregisterClient(client);
