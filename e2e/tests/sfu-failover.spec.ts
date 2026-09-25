@@ -28,7 +28,7 @@ async function waitForCluster(request: APIRequestContext, endpoint: string) {
   throw new Error(`cluster readiness timeout: ${endpoint} body=${JSON.stringify(lastBody)}`);
 }
 
-test("two-SFU Redis takeover: primary loss allows secondary ownership", async ({ request }) => {
+test("two-SFU Redis takeover: primary loss allows secondary ownership", async () => {
   test.skip(!process.env.SFU_FAILOVER_LIVE, "Set SFU_FAILOVER_LIVE=1 for the live Docker failover run");
 
   const aBody = await waitForCluster(request, primary);
