@@ -101,6 +101,7 @@ async function connect(page: Page, endpoint: string, roomId: string, userId: str
 
     const queue: any[] = [];
     const waiters = new Map<string, ((message: any) => void)[]>();
+    let protocolError: Error | undefined;
     const wait = (type: string) => new Promise<any>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("timeout " + type)), 60000);
       const index = queue.findIndex(message => message.type === type);
@@ -109,13 +110,33 @@ async function connect(page: Page, endpoint: string, roomId: string, userId: str
         resolve(queue.splice(index, 1)[0]);
         return;
       }
+      const errorIndex = queue.findIndex(message => message.type === "error");
+      if (errorIndex >= 0) {
+        clearTimeout(timer);
+        const message = queue.splice(errorIndex, 1)[0];
+        const code = message.data?.code ?? "UNKNOWN";
+        reject(new Error("SFU error " + code + (message.data?.endpoint ? " endpoint=" + message.data.endpoint : "")));
+        return;
+      }
       const list = waiters.get(type) ?? [];
       list.push(message => { clearTimeout(timer); resolve(message); });
       waiters.set(type, list);
+      const errors = waiters.get("__error__") ?? [];
+      errors.push(message => {
+        clearTimeout(timer);
+        const code = message.data?.code ?? "UNKNOWN";
+        reject(new Error("SFU error " + code + (message.data?.endpoint ? " endpoint=" + message.data.endpoint : "")));
+      });
+      waiters.set("__error__", errors);
     });
     ws.onmessage = event => {
       const message = JSON.parse(event.data);
       if (message.type === "ice" && message.data) void pc.addIceCandidate(message.data);
+      if (message.type === "error") {
+        const errors = waiters.get("__error__");
+        if (errors?.length) errors.shift()!(message); else queue.push(message);
+        return;
+      }
       const list = waiters.get(message.type);
       if (list?.length) list.shift()!(message); else queue.push(message);
     };
