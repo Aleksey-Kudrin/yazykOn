@@ -89,7 +89,6 @@ async function connect(page: Page, endpoint: string, roomId: string, userId: str
 
     const queue: any[] = [];
     const waiters = new Map<string, ((message: any) => void)[]>();
-    let protocolError: Error | undefined;
     const wait = (type: string) => new Promise<any>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("timeout " + type)), 60000);
       const index = queue.findIndex(message => message.type === type);
@@ -172,7 +171,13 @@ test("repeated SFU failover churn preserves peer identity and cleans replaced tr
       });
     }
 
-    const initial = await Promise.all(participants.map(p => connect(p.page, primary, roomId, p.userId)));
+    // Establish the room one participant at a time. The churn scenario is
+    // about failover/rejoin, while parallel initial joins add an unrelated
+    // race between room ownership/peer publication and make the probe flaky.
+    const initial: Awaited<ReturnType<typeof connect>>[] = [];
+    for (const participant of participants) {
+      initial.push(await connect(participant.page, primary, roomId, participant.userId));
+    }
     initial.forEach((r, i) => {
       participants[i].peerId = r.peerId;
       participants[i].trackIds = r.trackIds;
