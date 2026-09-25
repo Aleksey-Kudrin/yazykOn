@@ -166,7 +166,8 @@ export function Room({ roomId }: RoomProps) {
         pc.ontrack = (event) => {
           const stream = event.streams[0] ?? new MediaStream([event.track]);
           const id = stream.id || event.track.id;
-          remoteStreams.current.set(id, stream);\n          remoteTrackStreams.current.set(event.track.id, id);
+          remoteStreams.current.set(id, stream);
+          remoteTrackStreams.current.set(event.track.id, id);
           if (event.track.kind === "video") {
             event.track.onended = () => {
               const current = remoteStreams.current.get(id);
