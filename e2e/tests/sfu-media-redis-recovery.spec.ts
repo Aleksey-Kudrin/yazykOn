@@ -114,8 +114,7 @@ async function connect(page: import("@playwright/test").Page, endpoint: string, 
 
 test("media reconnect converges after Redis control-plane recovery", async ({ browser }) => {
   test.skip(!process.env.SFU_FAILOVER_LIVE, "Set SFU_FAILOVER_LIVE=1 for the live Docker run");
-  await health(primary);
-  await health(secondary);
+  await Promise.all([waitForClusterReady(primary), waitForClusterReady(secondary)]);
 
   const roomId = "REDIS-MEDIA-RECOVERY-" + Date.now();
   const pages = [
@@ -143,10 +142,8 @@ test("media reconnect converges after Redis control-plane recovery", async ({ br
     expect(secondaryDuringOutage.cluster).toBeFalsy();
 
     execFileSync("docker", ["compose", "-f", compose, "start", "redis"], { stdio: "inherit" });
-    const restoredPrimary = await health(primary);
-    const restoredSecondary = await health(secondary);
-    expect(restoredPrimary.cluster).toBeTruthy();
-    expect(restoredSecondary.cluster).toBeTruthy();
+    const restoredPrimary = await waitForClusterReady(primary);
+    const restoredSecondary = await waitForClusterReady(secondary);
 
     let recoveredOwner: any = null;
     for (let i = 0; i < 20; i++) {

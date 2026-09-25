@@ -45,67 +45,6 @@ async function redisSnapshot(roomIds: string[]) {
   return result;
 }
 
-mport { createHmac } from "node:crypto";
-import { execFileSync } from "node:child_process";
-import fs from "node:fs";
-import path from "node:path";
-import { test, expect, type Page } from "@playwright/test";
-import { waitForClusterReady } from "./helpers/sfu-health";
-
-const primary = process.env.SFU_PRIMARY_URL ?? "http://127.0.0.1:4100";
-const secondary = process.env.SFU_SECONDARY_URL ?? "http://127.0.0.1:4200";
-const compose = process.env.SFU_FAILOVER_COMPOSE ?? "e2e/docker-compose.sfu-failover.yml";
-const redisUrl = process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
-const secret = process.env.ROOM_ACCESS_SECRET ?? "integration-secret";
-const ttlMs = Number(process.env.SFU_ROOM_OWNER_TTL_MS ?? 3000);
-const roomsCount = Math.min(4, Math.max(2, Number(process.env.SFU_CHAOS_ROOMS ?? 3)));
-const members = 3;
-
-function accessToken(roomId: string, userId: string) {
-  const payload = Buffer.from(JSON.stringify({
-    roomId, userId, role: userId.endsWith("-0") ? "host" : "participant",
-    exp: Math.floor(Date.now() / 1000) + 900
-  })).toString("base64url");
-  return payload + "." + createHmac("sha256", secret).update(payload).digest("base64url");
-}
-
-async function redisSnapshot(roomIds: string[]) {
-  const { createClient } = await import("redis");
-  const client = createClient({ url: redisUrl });
-  await client.connect();
-  const result = [];
-  for (const roomId of roomIds) {
-    const ownerRaw = await client.get("yazykon:sfu:owner:" + roomId);
-    const state = await client.exists("yazykon:sfu:state:" + roomId);
-    const tracks = await client.exists("yazykon:sfu:tracks:" + roomId);
-    const peers = await client.keys("yazykon:sfu:peer:" + roomId + ":*");
-    result.push({
-      roomId,
-      owner: ownerRaw ? JSON.parse(ownerRaw) : null,
-      state,
-      tracks,
-      peerCount: peers.length,
-      peerKeys: peers.sort()
-    });
-  }
-  await client.quit();
-  return result;
-}
-
-async function waitHealth(endpoint: string, expectedCluster = true) {
-  for (let i = 0; i < 40; i++) {
-    try {
-      const response = await fetch(endpoint + "/health");
-      if (response.ok) {
-        const body = await response.json() as { cluster: boolean; nodeId: string };
-        if (body.cluster === expectedCluster) return body;
-      }
-    } catch {}
-    await new Promise(r => setTimeout(r, 250));
-  }
-  throw new Error("health convergence timeout: " + endpoint + " expected=" + expectedCluster);
-}
-
 async function waitHealthOutage(endpoint: string) {
   for (let i = 0; i < 40; i++) {
     try {
@@ -249,7 +188,8 @@ test("concurrent SFU crash plus Redis outage converges without ghost media state
     await new Promise(r => setTimeout(r, ttlMs + 1000));
 
     execFileSync("docker", ["compose", "-f", compose, "start", "redis"], { stdio: "inherit" });
-    await waitHealthOutage(primary);\n    await waitForClusterReady(secondary);
+    await waitHealthOutage(primary);
+    await waitForClusterReady(secondary);
 
     let takeover: Awaited<ReturnType<typeof redisSnapshot>> = [];
     for (let attempt = 0; attempt < 20; attempt++) {

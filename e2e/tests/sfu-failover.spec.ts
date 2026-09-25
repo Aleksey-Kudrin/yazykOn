@@ -4,35 +4,11 @@ import { waitForClusterReady } from "./helpers/sfu-health";
 const primary = process.env.SFU_PRIMARY_URL ?? "http://127.0.0.1:4100";
 const secondary = process.env.SFU_SECONDARY_URL ?? "http://127.0.0.1:4200";
 const waitMs = Number(process.env.SFU_FAILOVER_WAIT_MS ?? 7000);
-import { test, expect } from "@playwright/test";
-import { waitForClusterReady } from "./helpers/sfu-health";
-
-const primary = process.env.SFU_PRIMARY_URL ?? "http://127.0.0.1:4100";
-const secondary = process.env.SFU_SECONDARY_URL ?? "http://127.0.0.1:4200";
-const waitMs = Number(process.env.SFU_FAILOVER_WAIT_MS ?? 7000);
-const clusterWaitMs = Number(process.env.SFU_CLUSTER_READY_WAIT_MS ?? 20000);
-
-async function waitForCluster(request: APIRequestContext, endpoint: string) {
-  const deadline = Date.now() + clusterWaitMs;
-  let lastBody: any = null;
-  while (Date.now() < deadline) {
-    try {
-      const response = await request.get(new URL("/health", endpoint).toString());
-      if (response.ok()) {
-        lastBody = await response.json();
-        if (lastBody.cluster === true) return lastBody;
-      }
-    } catch {}
-    await new Promise(resolve => setTimeout(resolve, 250));
-  }
-  throw new Error(`cluster readiness timeout: ${endpoint} body=${JSON.stringify(lastBody)}`);
-}
-
 test("two-SFU Redis takeover: primary loss allows secondary ownership", async () => {
   test.skip(!process.env.SFU_FAILOVER_LIVE, "Set SFU_FAILOVER_LIVE=1 for the live Docker failover run");
 
-  const aBody = await waitForCluster(request, primary);
-  const bBody = await waitForCluster(request, secondary);
+  const aBody = await waitForClusterReady(primary);
+  const bBody = await waitForClusterReady(secondary);
   expect(aBody.nodeId).not.toBe(bBody.nodeId);
 
   // The actual browser/media recovery is intentionally kept separate from
@@ -40,12 +16,16 @@ test("two-SFU Redis takeover: primary loss allows secondary ownership", async ()
   // short SFU_ROOM_OWNER_TTL in the integration environment.
   await new Promise(resolve => setTimeout(resolve, waitMs));
 
-  const aAfter = await request.get(new URL("/health", primary).toString()).catch(() => null);
-  const bAfter = await request.get(new URL("/health", secondary).toString());
-  expect(bAfter.ok()).toBeTruthy();
+  let aAfter: { nodeId: string } | null = null;
+  try {
+    const response = await fetch(new URL("/health", primary).toString());
+    if (response.ok) aAfter = await response.json() as { nodeId: string };
+  } catch {}
 
-  if (aAfter) {
-    expect((await aAfter.json()).nodeId).toBe(aBody.nodeId);
-  }
-  expect((await bAfter.json()).nodeId).toBe(bBody.nodeId);
+  const bAfterResponse = await fetch(new URL("/health", secondary).toString());
+  expect(bAfterResponse.ok).toBeTruthy();
+  const bAfter = await bAfterResponse.json() as { nodeId: string };
+
+  if (aAfter) expect(aAfter.nodeId).toBe(aBody.nodeId);
+  expect(bAfter.nodeId).toBe(bBody.nodeId);
 });
