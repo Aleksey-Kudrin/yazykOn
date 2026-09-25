@@ -81,6 +81,7 @@ jobs:
           REDIS_URL: redis://127.0.0.1:6379
           SFU_PRIMARY_URL: http://127.0.0.1:4100
           SFU_SECONDARY_URL: http://127.0.0.1:4200
+          SFU_FAILOVER_COMPOSE: docker-compose.sfu-failover.yml
         run: |
           set +e
           tests=(
