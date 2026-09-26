@@ -176,3 +176,5 @@ jobs:
         if: always()
         run: docker compose -p yazykon-sfu-it -f docker-compose.sfu-failover.yml down -v
 # Manual CI trigger for the current SFU failover validation.
+
+# CI retrigger: run SFU failover validation on the latest fixes.
