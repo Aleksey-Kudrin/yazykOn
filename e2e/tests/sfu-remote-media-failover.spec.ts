@@ -63,7 +63,15 @@ async function connect(page: import("@playwright/test").Page, endpoint: string, 
 
     ws.onmessage = event => {
       const message = JSON.parse(event.data);
-      if (message.type === "ice" && message.data) void pc.addIceCandidate(message.data);
+      if (message.type === "ice" && message.data) {
+        const candidate = message.data;
+        if (pc.remoteDescription) {
+          void pc.addIceCandidate(candidate);
+        } else {
+          const pending = ((globalThis as any).__pendingIce ??= []);
+          pending.push(candidate);
+        }
+      }
       const list = waiters.get(message.type);
       if (list?.length) {
         list.shift()!(message);
