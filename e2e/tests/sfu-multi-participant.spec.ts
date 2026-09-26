@@ -7,7 +7,7 @@ const secret = process.env.ROOM_ACCESS_SECRET ?? "integration-secret";
 
 function token(userId: string) {
   const payload = Buffer.from(JSON.stringify({
-    roomId, userId, role: userId === "p1" ? "host" : "participant",
+    roomId, userId, role: userId === "p1" ? "host" : "member",
     exp: Math.floor(Date.now() / 1000) + 300
   })).toString("base64url");
   return payload + "." + createHmac("sha256", secret).update(payload).digest("base64url");
@@ -15,7 +15,7 @@ function token(userId: string) {
 
 async function connect(page: import("@playwright/test").Page, userId: string, peerId = "", expectRemoteMedia = false) {
   if (page.url() === "about:blank") await page.goto(process.env.BASE_URL ?? "http://localhost:5173");
-  return page.evaluate(async ({ endpoint, roomId, accessToken, peerId }) => {
+  return page.evaluate(async ({ endpoint, roomId, accessToken, peerId, expectRemoteMedia }) => {
     const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
     const pc = new RTCPeerConnection();
     let remoteTracks = 0;
