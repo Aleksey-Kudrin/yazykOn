@@ -13,13 +13,29 @@ function token(roomId: string, userId: string) {
 
 async function join(endpoint: string, roomId: string, peerId?: string) {
   const ws = new WebSocket(endpoint.replace(/^http/, "ws") + "/ws");
-  await new Promise<void>((resolve, reject) => {
+  const result = await new Promise<{ type: string; data?: any }>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("join timeout")), 10000);
-    ws.onopen = () => { ws.send(JSON.stringify({ type: "join", roomId, peerId, data: { accessToken: token(roomId, peerId ?? "cross-node"), reconnect: Boolean(peerId) } })); };
-    ws.onmessage = event => { const m = JSON.parse(event.data); if (m.type === "joined") { clearTimeout(timer); resolve(); } };
-    ws.onerror = () => { clearTimeout(timer); reject(new Error("websocket failed")); };
+    ws.onopen = () => {
+      ws.send(JSON.stringify({
+        type: "join",
+        roomId,
+        peerId,
+        data: { accessToken: token(roomId, peerId ?? "cross-node"), reconnect: Boolean(peerId) },
+      }));
+    };
+    ws.onmessage = event => {
+      const m = JSON.parse(event.data);
+      if (m.type === "joined" || m.type === "error") {
+        clearTimeout(timer);
+        resolve(m);
+      }
+    };
+    ws.onerror = () => {
+      clearTimeout(timer);
+      reject(new Error("websocket failed"));
+    };
   });
-  return ws;
+  return { ws, result };
 }
 
 async function ownerNode(redis: any, key: string) {
@@ -28,24 +44,37 @@ async function ownerNode(redis: any, key: string) {
   try { return JSON.parse(raw)?.nodeId ?? raw; } catch { return raw; }
 }
 
-test("cross-node reconnect preserves peer identity and Redis ownership", async () => {
+test("cross-node reconnect preserves peer identity and protects Redis ownership", async () => {
   test.skip(!process.env.SFU_FAILOVER_LIVE, "Set SFU_FAILOVER_LIVE=1 for the live Docker run");
   const { createClient } = await import("redis");
   const redis = createClient({ url: redisUrl });
   await redis.connect();
   const roomId = "CROSS-" + Date.now();
   const peerId = "peer-cross-node";
-  let ws = await join(primary, roomId, peerId);
-  const ownerKey = `yazykon:sfu:owner:${roomId}`;
+  let primaryWS: WebSocket | undefined;
+  let secondaryWS: WebSocket | undefined;
+
   try {
+    const primaryJoin = await join(primary, roomId, peerId);
+    primaryWS = primaryJoin.ws;
+    expect(primaryJoin.result.type).toBe("joined");
+
+    const ownerKey = `yazykon:sfu:owner:${roomId}`;
     await expect.poll(() => ownerNode(redis, ownerKey), { timeout: 5000 }).toBe("integration-primary");
-    ws.close();
-    await new Promise(resolve => setTimeout(resolve, 100));
-    ws = await join(secondary, roomId, peerId);
-    await expect.poll(() => ownerNode(redis, ownerKey), { timeout: 7000 }).toBe("integration-primary");
-    expect(ws.readyState).toBe(WebSocket.OPEN);
+
+    const secondaryJoin = await join(secondary, roomId, peerId);
+    secondaryWS = secondaryJoin.ws;
+
+    // A live primary owns the room. Secondary must not overwrite ownership;
+    // it should explicitly redirect the client to the current owner.
+    expect(secondaryJoin.result.type).toBe("error");
+    expect(secondaryJoin.result.data?.code).toBe("SFU_ROOM_OWNER");
+    expect(secondaryJoin.result.data?.endpoint).toBeTruthy();
+
+    await expect.poll(() => ownerNode(redis, ownerKey), { timeout: 3000 }).toBe("integration-primary");
   } finally {
-    ws.close();
+    primaryWS?.close();
+    secondaryWS?.close();
     await redis.del(ownerKey, `yazykon:sfu:state:${roomId}`, `yazykon:sfu:tracks:${roomId}`);
     await redis.quit();
   }
