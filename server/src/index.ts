@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import { Pool } from "pg";
 import { closeRedis, getRedis, redisEnabled, redisListPresence, redisSetPresence, redisClearPresence } from "./redis.js";
 import { BreakoutManager } from "./breakout/manager.js";
-import { validateCredentials, hashPassword, verifyPassword } from "./security.js";
+import { validateCredentials, hashPassword, verifyPassword, safeEqualHex } from "./security.js";
 
 type RoomRole = "host" | "cohost" | "member";
 
@@ -355,9 +355,8 @@ app.post("/api/rooms/:id/access", async (req, res) => {
 
   if (room.password_hash && room.password_salt) {
     const password = typeof req.body?.password === "string" ? req.body.password : "";
-    const actual = Buffer.from(requireScrypt(password, room.password_salt), "hex");
-    const expected = Buffer.from(room.password_hash, "hex");
-    if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
+    const actual = requireScrypt(password, room.password_salt);
+    if (!safeEqualHex(actual, room.password_hash)) {
       res.status(401).json({ error: "INVALID_ROOM_PASSWORD" }); return;
     }
   }
