@@ -379,6 +379,8 @@ export function Room({ roomId }: RoomProps) {
               return;
             }
             makingOffer.current = false;
+            iceRestarting.current = false;
+            pendingIceRestart.current = false;
             for (const candidate of pendingIce.current) await pc.addIceCandidate(candidate);
             pendingIce.current = [];
             return;
