@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"log"
-	"strings"\n\t"strconv"
-	"time"
+	"strings"
+	"strconv"
 )
 
 // The owner key is deliberately short-lived so a crashed SFU can stop being
