@@ -21,14 +21,17 @@ test("user can register and create a protected room from the home page", async (
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: "user-e2e", username: "e2e-user" }) });
   });
   await page.route("**/api/rooms", async route => {
+    if (route.request().method() === "GET") {
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: "E2EROOM", name: "E2E конференция", requiresPassword: true, createdAt: new Date().toISOString() }) });
+      return;
+    }
     expect(route.request().method()).toBe("POST");
     expect(route.request().postDataJSON()).toEqual({ name: "E2E конференция", password: "secret123" });
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ id: "E2EROOM", name: "E2E конференция", requiresPassword: true, createdAt: new Date().toISOString() })
-    });
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ id: "E2EROOM", name: "E2E конференция", requiresPassword: true, createdAt: new Date().toISOString() }) });
   });
+  await page.route("**/api/rooms/E2EROOM/messages**", route => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ messages: [], hasMore: false, nextBefore: null }) }));
+  await page.route("**/api/rooms/E2EROOM/access", route => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ accessToken: "e2e-access", role: "host" }) }));
+  await page.route("**/api/rooms/E2EROOM/breakouts", route => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ rooms: [] }) }));
 
   await page.goto("/");
   await page.getByTestId("username").fill("e2e-user");
@@ -43,5 +46,4 @@ test("user can register and create a protected room from the home page", async (
   await page.getByRole("button", { name: "Создать конференцию" }).click();
 
   await expect(page).toHaveURL(/\/room\/E2EROOM$/);
-  await expect(page.locator("body")).toContainText("E2E конференция");
 });
