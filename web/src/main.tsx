@@ -58,6 +58,44 @@ function Home() {
           {status}
         </div>
 
+        {!user ? (
+          <div className="auth" data-testid="auth-panel">
+            <h2>{authMode === "login" ? "Вход" : "Регистрация"}</h2>
+            <input
+              value={username}
+              onChange={(event) => setUsername(event.target.value)}
+              placeholder="Имя пользователя"
+              autoComplete="username"
+              maxLength={32}
+              data-testid="username"
+            />
+            <input
+              type="password"
+              value={authPassword}
+              onChange={(event) => setAuthPassword(event.target.value)}
+              placeholder="Пароль"
+              autoComplete={authMode === "login" ? "current-password" : "new-password"}
+              maxLength={128}
+              data-testid="auth-password"
+            />
+            <button onClick={handleAuth} data-testid="auth-submit">
+              {authMode === "login" ? "Войти" : "Зарегистрироваться"}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setAuthMode(authMode === "login" ? "register" : "login"); setAuthError(""); }}
+              data-testid="auth-toggle"
+            >
+              {authMode === "login" ? "Создать аккаунт" : "Уже есть аккаунт"}
+            </button>
+            {authError && <div role="alert">{authError}</div>}
+          </div>
+        ) : (
+          <div className="auth" data-testid="user-panel">
+            <span>Вы вошли как <strong>{user.username}</strong></span>
+          </div>
+        )}
+
         <input
           value={name}
           onChange={(event) => setName(event.target.value)}
