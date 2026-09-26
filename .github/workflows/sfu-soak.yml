@@ -1,0 +1,64 @@
+name: SFU Long Soak
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "media/**"
+      - "e2e/**"
+      - ".github/workflows/sfu-soak.yml"
+  pull_request:
+    paths:
+      - "media/**"
+      - "e2e/**"
+      - ".github/workflows/sfu-soak.yml"
+  workflow_dispatch:
+
+jobs:
+  sfu-soak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm install
+        working-directory: web
+
+      - run: npm install
+        working-directory: e2e
+
+      - run: npx playwright install --with-deps chromium
+        working-directory: e2e
+
+      - run: docker compose -f e2e/docker-compose.sfu-failover.yml up -d --build
+
+      - name: Run SFU long soak
+        env:
+          SFU_FAILOVER_LIVE: "1"
+          SFU_SOAK_DURATION_MS: "120000"
+          SFU_SOAK_SAMPLE_MS: "2000"
+          SFU_SOAK_CYCLE_MS: "10000"
+          SFU_FAILOVER_SLA_MS: "30000"
+          SFU_SOAK_MAX_ERROR_RATE: "0.01"
+        run: npm run test -- tests/sfu-long-soak.spec.ts
+        working-directory: e2e
+
+      - name: Upload soak report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sfu-long-soak-report
+          path: e2e/artifacts/sfu-long-soak-report.json
+          if-no-files-found: ignore
+
+      - name: Compose logs
+        if: always()
+        run: docker compose -f e2e/docker-compose.sfu-failover.yml logs --no-color
+
+      - name: Stop SFU stack
+        if: always()
+        run: docker compose -f e2e/docker-compose.sfu-failover.yml down -v
