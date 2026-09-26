@@ -184,7 +184,7 @@ export function Room({ roomId }: RoomProps) {
               iceRestartTimer.current = null;
               pendingIceRestart.current = false;
               if (stopped || generation !== connectionGeneration.current || peer.current !== pc) return;
-              if (socket.current?.readyState !== WebSocket.OPEN) return;
+              if (socket.current?.readyState !== WebSocket.OPEN) { pendingIceRestart.current = true; return; }
               if (pc.signalingState !== "stable" || makingOffer.current) { pendingIceRestart.current = true; return; }
               iceRestarting.current = true;
               makingOffer.current = true;
