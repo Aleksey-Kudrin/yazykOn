@@ -6,6 +6,7 @@ services:
       ROOM_ACCESS_SECRET: media-e2e-room-secret
       MEDIA_CONTROL_SECRET: media-e2e-control-secret
       WEBRTC_PUBLIC_IP: 127.0.0.1
+      WEB_ORIGINS: http://127.0.0.1:4100,http://127.0.0.1:4200
     ports:
       - "4100:4000"
       - "50000-50100:50000-50100/udp"
