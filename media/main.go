@@ -730,6 +730,7 @@ func main() {
       "yazykon_media_owner_redirects_total " + strconv.FormatInt(failoverOwnerRedirects.Load(), 10) + "\n" +
       "yazykon_media_goroutines " + strconv.Itoa(runtime.NumGoroutine()) + "\n" +
       "yazykon_media_heap_bytes " + strconv.FormatUint(mem.HeapAlloc, 10) + "\n" +
+      "yazykon_media_heap_inuse_bytes " + strconv.FormatUint(mem.HeapInuse, 10) + "\n" +
       "yazykon_media_alloc_bytes_total " + strconv.FormatUint(mem.TotalAlloc, 10) + "\n" +
       "yazykon_media_gc_cycles_total " + strconv.FormatUint(uint64(mem.NumGC), 10) + "\n"))
   })
