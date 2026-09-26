@@ -79,7 +79,7 @@ test("SFU capacity soak stays healthy with runtime leak budgets", async () => {
   const last = samples[samples.length - 1];
   const required = [
     "yazykon_media_goroutines",
-    "yazykon_media_heap_bytes",
+    "yazykon_media_heap_inuse_bytes",
     "yazykon_media_active_peers",
     "yazykon_media_active_rooms"
   ];
@@ -90,14 +90,14 @@ test("SFU capacity soak stays healthy with runtime leak budgets", async () => {
   const growths = first && last ? [
     growth(first.primaryMetrics.yazykon_media_goroutines ?? 0, last.primaryMetrics.yazykon_media_goroutines ?? 0),
     growth(first.secondaryMetrics.yazykon_media_goroutines ?? 0, last.secondaryMetrics.yazykon_media_goroutines ?? 0),
-    growth(first.primaryMetrics.yazykon_media_heap_bytes ?? 0, last.primaryMetrics.yazykon_media_heap_bytes ?? 0),
-    growth(first.secondaryMetrics.yazykon_media_heap_bytes ?? 0, last.secondaryMetrics.yazykon_media_heap_bytes ?? 0)
+    growth(first.primaryMetrics.yazykon_media_heap_inuse_bytes ?? 0, last.primaryMetrics.yazykon_media_heap_inuse_bytes ?? 0),
+    growth(first.secondaryMetrics.yazykon_media_heap_inuse_bytes ?? 0, last.secondaryMetrics.yazykon_media_heap_inuse_bytes ?? 0)
   ].filter((value): value is number => value !== null && Number.isFinite(value)) : [];
   const maxObservedResourceGrowth = growths.length ? Math.max(...growths) : Infinity;
 
   const heapValues = samples.flatMap(sample => [
-    sample.primaryMetrics.yazykon_media_heap_bytes,
-    sample.secondaryMetrics.yazykon_media_heap_bytes
+    sample.primaryMetrics.yazykon_media_heap_inuse_bytes,
+    sample.secondaryMetrics.yazykon_media_heap_inuse_bytes
   ]).filter((value): value is number => Number.isFinite(value));
   const maxHeap = heapValues.length ? Math.max(...heapValues) : null;
 
