@@ -55,8 +55,9 @@ async function join(page: import("@playwright/test").Page, endpoint: string, roo
     for(const track of stream.getTracks())pc.addTrack(track,stream);
     const joined=new Promise<any>((resolve,reject)=>{
       const timer=setTimeout(()=>reject(new Error("join timeout")),15000);
-      ws.onopen=()=>ws.send(JSON.stringify({type:"join",roomId,data:{accessToken,reconnect:Boolean(peerId),...(peerId?{peerId}:{})}}));
+      ws.onopen=()=>{ try { ws.send(JSON.stringify({type:"join",roomId,data:{accessToken,reconnect:Boolean(peerId),...(peerId?{peerId}:{})}})); } catch (error) { clearTimeout(timer); reject(error); } };
       ws.onerror=()=>{clearTimeout(timer);reject(new Error("websocket failed"));};
+      ws.onclose=event=>{ if (event.code !== 1000) { clearTimeout(timer); reject(new Error(`websocket closed: ${event.code} ${event.reason}`)); } };
       ws.onmessage=event=>{const message=JSON.parse(event.data);if(message.type==="joined"){clearTimeout(timer);resolve(message);}};
     });
     const joinedMessage=await joined;
