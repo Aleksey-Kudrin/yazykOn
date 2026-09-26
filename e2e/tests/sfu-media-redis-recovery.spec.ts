@@ -102,7 +102,8 @@ async function connect(page: import("@playwright/test").Page, endpoint: string, 
     };
     ws.send(JSON.stringify({
       type: "join", roomId,
-      data: { accessToken, reconnect: Boolean(peerId), ...(peerId ? { peerId } : {}) }
+      ...(peerId ? { peerId } : {}),
+      data: { accessToken, reconnect: Boolean(peerId) }
     }));
     const joined = await wait("joined");
     const offer = await pc.createOffer();
