@@ -9,10 +9,10 @@ import (
 )
 
 // The owner key is deliberately short-lived so a crashed SFU can stop being
-// authoritative quickly. A node that is alive must also be able to take over
-// rooms that were owned by a node that disappeared without a graceful close.
-// Reclamation is done with SETNX, so two healthy nodes cannot both win the
-// same expired owner key.
+authoritative quickly. A node that is alive must also be able to take over
+rooms that were owned by a node that disappeared without a graceful close.
+// Reclamation is done atomically with the room-state owner update so a
+// recovered room cannot keep advertising the previous node as its owner.
 func init() {
 	go func() {
 		// clusterInit() runs from main, so wait until that control plane exists.
@@ -50,11 +50,9 @@ func clusterReclaimExpiredRooms() {
 			"endpoint": clusterNodeEndpoint(),
 		})
 
-		// A Redis outage can make the owner lease disappear even though the
-		// original SFU is still alive and reconnecting. Do not let another node
-		// reclaim the room in that window. The room snapshot records who last
-		// owned it, while the node heartbeat proves that owner is alive.
-		// Check both and claim atomically so recovery cannot race with failover.
+		// Redis executes the script atomically. A live previous owner blocks
+		// reclamation; a successful claim also changes the persisted room owner
+		// in the same transaction, preventing stale ownerNodeId after recovery.
 		claimedRaw, err := client.Eval(ctx, `
 local ownerRaw = redis.call("GET", KEYS[1])
 if ownerRaw then return 0 end
@@ -66,7 +64,18 @@ if stateRaw then
     if redis.call("EXISTS", heartbeatKey) == 1 then return 0 end
   end
 end
-return redis.call("SET", KEYS[1], ARGV[2], "EX", ARGV[3], "NX") and 1 or 0
+local claimed = redis.call("SET", KEYS[1], ARGV[2], "EX", ARGV[3], "NX")
+if not claimed then return 0 end
+if stateRaw then
+  local ok, state = pcall(cjson.decode, stateRaw)
+  if ok then
+    state.ownerNodeId = ARGV[1]
+    local ttl = redis.call("PTTL", KEYS[2])
+    redis.call("SET", KEYS[2], cjson.encode(state))
+    if ttl > 0 then redis.call("PEXPIRE", KEYS[2], ttl) end
+  end
+end
+return 1
 `, []string{ownerKey, stateKey}, nodeID, string(payload), strconv.Itoa(int(sfuRoomOwnerTTL().Seconds()))).Result()
 		if err != nil {
 			continue
