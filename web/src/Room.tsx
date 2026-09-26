@@ -213,7 +213,11 @@ export function Room({ roomId }: RoomProps) {
             setStatus("Соединение установлено");
           } else if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
             setStatus("WebRTC: восстанавливаем соединение…");
-            if (!pendingIceRestart.current && !iceRestarting.current && socket.current?.readyState === WebSocket.OPEN) {
+            if (!pendingIceRestart.current && !iceRestarting.current) {
+              if (socket.current?.readyState !== WebSocket.OPEN) {
+                pendingIceRestart.current = true;
+                return;
+              }
               if (pc.signalingState !== "stable" || makingOffer.current) {
                 pendingIceRestart.current = true;
                 return;
@@ -262,6 +266,7 @@ export function Room({ roomId }: RoomProps) {
             ws.send(JSON.stringify({ type: "offer", roomId: sfuRoomId, data: pc.localDescription }));
             makingOffer.current = false;
           } catch (error) {
+            makingOffer.current = false;
             console.error("initial WebRTC offer failed", error);
             setStatus("Не удалось начать WebRTC-соединение");
           }
@@ -368,7 +373,11 @@ export function Room({ roomId }: RoomProps) {
             return;
           }
           if (message.type === "answer") {
-            if (pc.signalingState !== "have-local-offer") return;
+            if (pc.signalingState !== "have-local-offer") {
+              makingOffer.current = false;
+              iceRestarting.current = false;
+              return;
+            }
             try {
               await pc.setRemoteDescription(message.data);
             } catch (error) {
