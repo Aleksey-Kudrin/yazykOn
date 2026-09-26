@@ -275,34 +275,55 @@ func clusterClaimRoom(roomID string) (bool, string) {
 	client := clusterRedis
 	nodeID := clusterNodeID
 	clusterMu.RUnlock()
-	if client == nil || !clusterReady.Load() {
-		return true, ""
-	}
+	if client == nil || !clusterReady.Load() { return true, "" }
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	key := clusterOwnerKey(roomID)
+	stateKey := clusterRoomStateKey(roomID)
 	payload := redisJSON(map[string]any{"nodeId": nodeID, "endpoint": clusterNodeEndpoint()})
-	claimed, err := client.SetNX(ctx, key, payload, sfuRoomOwnerTTL()).Result()
-	if err != nil {
-		log.Printf("SFU Redis room claim failed: %v", err)
-		return false, ""
-	}
-	if claimed {
-		failoverClaims.Add(1)
-		return true, ""
-	}
+
+	const claimScript = `
+local current = redis.call("GET", KEYS[1])
+if current then
+  local ok, owner = pcall(cjson.decode, current)
+  if ok and owner.nodeId == ARGV[1] then return 1 end
+  return 0
+end
+local stateRaw = redis.call("GET", KEYS[2])
+if stateRaw then
+  local ok, state = pcall(cjson.decode, stateRaw)
+  if ok and state.ownerNodeId and state.ownerNodeId ~= "" and state.ownerNodeId ~= ARGV[1] then
+    local heartbeatKey = "yazykon:sfu:node:" .. state.ownerNodeId
+    if redis.call("EXISTS", heartbeatKey) == 1 then return 0 end
+  end
+end
+local claimed = redis.call("SET", KEYS[1], ARGV[2], "PX", ARGV[3], "NX")
+if not claimed then return 0 end
+if stateRaw then
+  local ok, state = pcall(cjson.decode, stateRaw)
+  if ok then
+    state.ownerNodeId = ARGV[1]
+    local ttl = redis.call("PTTL", KEYS[2])
+    redis.call("SET", KEYS[2], cjson.encode(state))
+    if ttl > 0 then redis.call("PEXPIRE", KEYS[2], ttl) end
+  end
+end
+return 1
+`
+	result, err := client.Eval(ctx, claimScript, []string{key, stateKey}, nodeID, string(payload), strconv.FormatInt(sfuRoomOwnerTTL().Milliseconds(), 10)).Result()
+	if err != nil { log.Printf("SFU Redis room claim failed: %v", err); return false, "" }
+	if result == int64(1) { failoverClaims.Add(1); return true, "" }
 	current, err := client.Get(ctx, key).Result()
-	if err != nil {
-		return false, ""
+	if err == nil {
+		var owner map[string]any
+		if json.Unmarshal([]byte(current), &owner) == nil {
+			ownerNode, _ := owner["nodeId"].(string)
+			endpoint, _ := owner["endpoint"].(string)
+			if ownerNode != nodeID { failoverOwnerRedirects.Add(1) }
+			return ownerNode == nodeID, endpoint
+		}
 	}
-	var owner struct { NodeID string `json:"nodeId"`; Endpoint string `json:"endpoint"` }
-	if json.Unmarshal([]byte(current), &owner) != nil {
-		return false, ""
-	}
-	if owner.NodeID != nodeID {
-		failoverOwnerRedirects.Add(1)
-	}
-	return owner.NodeID == nodeID, owner.Endpoint
+	return false, ""
 }
 
 func clusterRenewOwnedRooms() {
