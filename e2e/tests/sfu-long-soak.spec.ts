@@ -5,7 +5,13 @@ import { test, expect } from "@playwright/test";
 
 const primary = process.env.SFU_PRIMARY_URL ?? "http://127.0.0.1:4100";
 const secondary = process.env.SFU_SECONDARY_URL ?? "http://127.0.0.1:4200";
-const composeFile = process.env.SFU_FAILOVER_COMPOSE ?? "e2e/docker-compose.sfu-failover.yml";
+const configuredComposeFile = process.env.SFU_FAILOVER_COMPOSE;
+const composeName = "docker-compose.sfu-failover.yml";
+const composeFile = configuredComposeFile
+  ? path.resolve(process.cwd(), configuredComposeFile)
+  : fs.existsSync(path.resolve(process.cwd(), composeName))
+    ? path.resolve(process.cwd(), composeName)
+    : path.resolve(process.cwd(), "e2e", composeName);
 const durationMs = Math.max(10000, Number(process.env.SFU_SOAK_DURATION_MS ?? 120000));
 const sampleMs = Math.max(250, Number(process.env.SFU_SOAK_SAMPLE_MS ?? 2000));
 const cycleMs = Math.max(1000, Number(process.env.SFU_SOAK_CYCLE_MS ?? 10000));
