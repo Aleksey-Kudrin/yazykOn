@@ -44,8 +44,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24"
-          cache: false
-      - run: go mod tidy
+          cache: true
+      - run: go mod download
       - run: go build ./...
       - run: go test ./...
 
