@@ -49,6 +49,9 @@ jobs:
           SFU_CLUSTER_HEARTBEAT: 1s
           SFU_LOAD_ROOMS: "3"
           SFU_LOAD_PARTICIPANTS: "8"
+          # CI exercises up to 24 concurrent browser sessions from one runner IP.
+          # Keep the production default (8) intact; raise only the integration-test cap.
+          MAX_WS_PER_IP: "64"
           SFU_LOAD_CYCLES: "3"
           SFU_METRICS_SAMPLE_MS: "1000"
           SFU_SOAK_DURATION_MS: "120000"
