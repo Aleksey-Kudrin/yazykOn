@@ -382,7 +382,9 @@ export function Room({ roomId }: RoomProps) {
               await pc.setRemoteDescription(message.data);
             } catch (error) {
               console.warn("failed to apply remote answer", error);
+              makingOffer.current = false;
               iceRestarting.current = false;
+              pendingIceRestart.current = true;
               setStatus("WebRTC: ответ сигнализации устарел, переподключаемся…");
               ws.close();
               return;
@@ -398,8 +400,20 @@ export function Room({ roomId }: RoomProps) {
             const descriptionKey = JSON.stringify(message.data);
             if (lastRemoteDescription.current === descriptionKey) return;
             if (pc.signalingState !== "stable") {
-              ignoreOffer.current = true;
-              return;
+              if (makingOffer.current && pc.signalingState === "have-local-offer") {
+                try {
+                  await pc.setLocalDescription({ type: "rollback" });
+                  makingOffer.current = false;
+                  iceRestarting.current = false;
+                } catch (error) {
+                  console.warn("failed to rollback local offer", error);
+                  ignoreOffer.current = true;
+                  return;
+                }
+              } else {
+                ignoreOffer.current = true;
+                return;
+              }
             }
             ignoreOffer.current = false;
             try {
