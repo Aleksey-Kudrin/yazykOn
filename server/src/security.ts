@@ -31,7 +31,8 @@ export function hashPassword(password: string): string {
 }
 
 export function verifyPassword(password: string, stored: string): boolean {
-  const parts = stored.split("$");
+  try {
+    const parts = stored.split("$");
   if (parts.length === 3 && parts[0] === "v2") {
     const actual = scryptSync(password, parts[1], 32, { N: 32768, r: 8, p: 2, maxmem: 64 * 1024 * 1024 });
     const expected = Buffer.from(parts[2], "hex");
@@ -40,5 +41,8 @@ export function verifyPassword(password: string, stored: string): boolean {
   const legacy = stored.split(":");
   if (legacy.length !== 2) return false;
   const actual = scryptSync(password, legacy[0], 32).toString("hex");
-  return safeEqualHex(actual, legacy[1]);
+    return safeEqualHex(actual, legacy[1]);
+  } catch {
+    return false;
+  }
 }
