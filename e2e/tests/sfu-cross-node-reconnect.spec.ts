@@ -51,6 +51,7 @@ test("cross-node reconnect preserves peer identity and protects Redis ownership"
   await redis.connect();
   const roomId = "CROSS-" + Date.now();
   const peerId = "peer-cross-node";
+  const ownerKey = `yazykon:sfu:owner:${roomId}`;
   let primaryWS: WebSocket | undefined;
   let secondaryWS: WebSocket | undefined;
 
@@ -59,14 +60,11 @@ test("cross-node reconnect preserves peer identity and protects Redis ownership"
     primaryWS = primaryJoin.ws;
     expect(primaryJoin.result.type).toBe("joined");
 
-    const ownerKey = `yazykon:sfu:owner:${roomId}`;
     await expect.poll(() => ownerNode(redis, ownerKey), { timeout: 5000 }).toBe("integration-primary");
 
     const secondaryJoin = await join(secondary, roomId, peerId);
     secondaryWS = secondaryJoin.ws;
 
-    // A live primary owns the room. Secondary must not overwrite ownership;
-    // it should explicitly redirect the client to the current owner.
     expect(secondaryJoin.result.type).toBe("error");
     expect(secondaryJoin.result.data?.code).toBe("SFU_ROOM_OWNER");
     expect(secondaryJoin.result.data?.endpoint).toBeTruthy();
