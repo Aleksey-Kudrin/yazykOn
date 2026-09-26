@@ -1,0 +1,40 @@
+name: SFU WebRTC Media E2E
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "media/**"
+      - "e2e/**"
+      - ".github/workflows/sfu-media-e2e.yml"
+  pull_request:
+    paths:
+      - "media/**"
+      - "e2e/**"
+      - ".github/workflows/sfu-media-e2e.yml"
+  workflow_dispatch:
+
+jobs:
+  media-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+        working-directory: e2e
+      - run: npx playwright install --with-deps chromium
+        working-directory: e2e
+      - name: Start primary SFU
+        run: docker compose -f e2e/docker-compose.sfu-media.yml up -d --build sfu-primary
+      - name: Run real WebRTC media failover
+        run: npm run test -- tests/sfu-media-e2e.spec.ts
+        working-directory: e2e
+      - name: SFU media compose logs
+        if: always()
+        run: docker compose -f e2e/docker-compose.sfu-media.yml logs --no-color
+      - name: Stop SFU media stack
+        if: always()
+        run: docker compose -f e2e/docker-compose.sfu-media.yml down -v
