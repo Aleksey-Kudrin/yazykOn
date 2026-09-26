@@ -1,9 +1,38 @@
+import { createHmac } from "node:crypto";
 import { test, expect } from "@playwright/test";
 import WebSocket from "ws";
 
 const redisUrl = process.env.REDIS_URL ?? "redis://127.0.0.1:6379";
 const primary = process.env.SFU_PRIMARY_URL ?? "http://127.0.0.1:4100";
 const secondary = process.env.SFU_SECONDARY_URL ?? "http://127.0.0.1:4200";
+const secret = process.env.ROOM_ACCESS_SECRET ?? "integration-secret";
+
+function accessToken(roomId: string, userId: string) {
+  const payload = Buffer.from(JSON.stringify({
+    roomId, userId, role: "host", exp: Math.floor(Date.now() / 1000) + 600
+  })).toString("base64url");
+  return payload + "." + createHmac("sha256", secret).update(payload).digest("base64url");
+}
+
+async function join(endpoint: string, roomId: string, peerId: string) {
+  const ws = new WebSocket(endpoint.replace(/^http/, "ws") + "/ws");
+  const result = await new Promise<any>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("join timeout")), 10000);
+    ws.onopen = () => ws.send(JSON.stringify({
+      type: "join", roomId, peerId,
+      data: { accessToken: accessToken(roomId, "cross-node-user"), reconnect: Boolean(peerId) }
+    }));
+    ws.onmessage = event => {
+      const message = JSON.parse(String(event.data));
+      if (message.type === "joined" || message.type === "error") {
+        clearTimeout(timer);
+        resolve(message);
+      }
+    };
+    ws.onerror = () => { clearTimeout(timer); reject(new Error("websocket failed")); };
+  });
+  return { ws, result };
+}
 
 async function ownerNode(redis: any, ownerKey: string) {
   const raw = await redis.get(ownerKey);
