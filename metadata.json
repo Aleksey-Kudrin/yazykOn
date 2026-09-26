@@ -1,7 +1,0 @@
-{
-  "name": "языкOn",
-  "description": "Платформа для видеоконференций с комнатами, чатом, сессионными залами и модерацией.",
-  "capabilities": [
-    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
-  ]
-}
