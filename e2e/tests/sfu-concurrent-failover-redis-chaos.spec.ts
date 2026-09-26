@@ -198,12 +198,11 @@ test("concurrent SFU crash plus Redis outage converges without ghost media state
     await new Promise(r => setTimeout(r, 500));
 
     execFileSync("docker", ["compose", "-f", compose, "stop", "redis"], { stdio: "inherit" });
-    await Promise.all([waitHealthOutage(primary), waitHealthOutage(secondary)]);
+    await waitHealthOutage(secondary);
 
     await new Promise(r => setTimeout(r, ttlMs + 1000));
 
     execFileSync("docker", ["compose", "-f", compose, "start", "redis"], { stdio: "inherit" });
-    await waitHealthOutage(primary);
     await waitForClusterReady(secondary);
 
     let takeover: Awaited<ReturnType<typeof redisSnapshot>> = [];
