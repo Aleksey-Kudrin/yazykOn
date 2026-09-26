@@ -53,7 +53,8 @@ export async function redisListPresence(roomId: string) {
   const prefix = `yazykon:presence:${roomId}:`;
   const users: string[] = [];
   for await (const key of redis.scanIterator({ MATCH: `${prefix}*`, COUNT: 100 })) {
-    users.push(key.slice(prefix.length));
+    const keys = Array.isArray(key) ? key : [key];
+    for (const item of keys) users.push(item.slice(prefix.length));
   }
   return users;
 }
