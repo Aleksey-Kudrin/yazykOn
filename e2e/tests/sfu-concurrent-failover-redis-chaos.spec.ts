@@ -104,7 +104,15 @@ async function connect(page: Page, endpoint: string, roomId: string, userId: str
 
     ws.onmessage = event => {
       const message = JSON.parse(event.data);
-      if (message.type === "ice" && message.data) void pc.addIceCandidate(message.data);
+      if (message.type === "ice" && message.data) {
+        const candidate = message.data;
+        if (pc.remoteDescription) {
+          void pc.addIceCandidate(candidate);
+        } else {
+          const pending = ((globalThis as any).__pendingIce ??= []);
+          pending.push(candidate);
+        }
+      }
       const list = waiters.get(message.type);
       if (list?.length) list.shift()!(message); else queue.push(message);
     };
@@ -129,7 +137,14 @@ async function connect(page: Page, endpoint: string, roomId: string, userId: str
     await pc.setLocalDescription(offer);
     ws.send(JSON.stringify({ type: "offer", roomId, data: pc.localDescription }));
     const answer = await wait("answer");
-    if (answer.data) await pc.setRemoteDescription(answer.data);
+    if (answer.data) {
+      await pc.setRemoteDescription(answer.data);
+      const pending = ((globalThis as any).__pendingIce ?? []) as RTCIceCandidateInit[];
+      while (pending.length) {
+        const candidate = pending.shift();
+        if (candidate) await pc.addIceCandidate(candidate);
+      }
+    }
 
     state.ws = ws;
     state.pc = pc;
