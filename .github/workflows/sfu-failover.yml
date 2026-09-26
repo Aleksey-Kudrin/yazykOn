@@ -120,6 +120,7 @@ jobs:
             tests/sfu-concurrent-room-churn.spec.ts
             tests/sfu-room-isolation-churn.spec.ts
             tests/sfu-concurrent-media-chaos.spec.ts
+            tests/sfu-churn-leak.spec.ts
             tests/sfu-media-redis-recovery.spec.ts
             tests/sfu-concurrent-failover-redis-chaos.spec.ts
             tests/sfu-repeated-chaos-churn.spec.ts
