@@ -214,7 +214,10 @@ export function Room({ roomId }: RoomProps) {
           } else if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
             setStatus("WebRTC: восстанавливаем соединение…");
             if (!pendingIceRestart.current && !iceRestarting.current && socket.current?.readyState === WebSocket.OPEN) {
-              if (pc.signalingState !== "stable" || makingOffer.current) return;
+              if (pc.signalingState !== "stable" || makingOffer.current) {
+                pendingIceRestart.current = true;
+                return;
+              }
               iceRestarting.current = true;
               makingOffer.current = true;
               void pc.createOffer({ iceRestart: true }).then(async offer => {
