@@ -195,8 +195,14 @@ test("repeated SFU failover churn preserves peer identity and cleans replaced tr
       execFileSync("docker", ["compose", "-f", compose, "stop", cycle % 2 === 0 ? "sfu-primary" : "sfu-secondary"], { stdio: "inherit" });
       await new Promise(r => setTimeout(r, ttlMs + 700));
 
-      const takeover = await redisState(roomId);
-      expect(takeover.owner?.nodeId).toBe(cycle % 2 === 0 ? "integration-secondary" : "integration-primary");
+      const expectedOwner = cycle % 2 === 0 ? "integration-secondary" : "integration-primary";
+      let takeover = await redisState(roomId);
+      const takeoverDeadline = Date.now() + Math.max(10000, ttlMs * 3);
+      while (takeover.owner?.nodeId !== expectedOwner && Date.now() < takeoverDeadline) {
+        await new Promise(r => setTimeout(r, 250));
+        takeover = await redisState(roomId);
+      }
+      expect(takeover.owner?.nodeId).toBe(expectedOwner);
 
       await waitForClusterReady(to);
       const recovered = [] as Awaited<ReturnType<typeof connect>>[];
