@@ -4,7 +4,6 @@ import express from "express";
 import helmet from "helmet";
 import { createServer } from "node:http";
 import { Pool } from "pg";
-import { attachSignaling } from "./signaling.js";
 import { closeRedis, getRedis, redisEnabled, redisListPresence, redisSetPresence, redisClearPresence } from "./redis.js";
 import { BreakoutManager } from "./breakout/manager.js";
 import { validateCredentials, hashPassword, verifyPassword } from "./security.js";
@@ -651,7 +650,6 @@ app.get("/api/rooms/:id/audit", async (req, res) => {
 });
 
 const server = createServer(app);
-attachSignaling(server);
 
 initDatabase().then(() => {
   if (db) {
