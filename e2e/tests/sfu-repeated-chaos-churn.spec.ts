@@ -211,6 +211,7 @@ test("repeated SFU failover churn preserves peer identity and cleans replaced tr
         participants[i].trackHistory.push(r.trackIds);
         if (i === cycle % members && cycle > 0) {
           expect(r.trackIds.join()).not.toBe(participants[i].trackHistory[0].join());
+          participants[i].trackIds = r.trackIds;
         } else {
           expect(r.trackIds).toEqual(participants[i].trackIds);
         }
