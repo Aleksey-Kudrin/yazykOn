@@ -21,6 +21,7 @@ services:
       SFU_ROOM_OWNER_TTL: 3s
       SFU_CLUSTER_HEARTBEAT: 1s
       WEB_ORIGINS: http://localhost:5173,http://127.0.0.1:4100,http://127.0.0.1:4200
+      MAX_WS_PER_IP: 64
     ports:
       - "4100:4000/tcp"
       - "51000-51100:50000-50100/udp"
