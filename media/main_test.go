@@ -148,8 +148,8 @@ func TestModerationAuthorization(t *testing.T) {
   if canModerate(host, nil, "invalid") { t.Fatal("unknown moderation action accepted") }
 }
 
-func TestNegotiationFinishedQueuesPendingRenegotiation(t *testing.T) {
-  p := &Peer{negotiating: true, negotiationPending: true}
+func TestNegotiationFinishedConsumesPendingStateWhenClosed(t *testing.T) {
+  p := &Peer{negotiating: true, negotiationPending: true, closed: true}
   negotiationFinished(p)
   if p.negotiating { t.Fatal("negotiation should be marked finished") }
   if p.negotiationPending { t.Fatal("pending flag should be consumed") }
