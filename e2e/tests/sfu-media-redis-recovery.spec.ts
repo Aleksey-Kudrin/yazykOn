@@ -14,7 +14,7 @@ const roomTtl = Number(process.env.SFU_ROOM_OWNER_TTL_MS ?? 3000);
 
 function token(roomId: string, userId: string) {
   const payload = Buffer.from(JSON.stringify({
-    roomId, userId, role: userId.endsWith("-0") ? "host" : "participant",
+    roomId, userId, role: userId.endsWith("-0") ? "host" : "member",
     exp: Math.floor(Date.now() / 1000) + 600
   })).toString("base64url");
   return payload + "." + createHmac("sha256", secret).update(payload).digest("base64url");
