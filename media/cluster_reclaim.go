@@ -10,7 +10,7 @@ import (
 
 // The owner key is deliberately short-lived so a crashed SFU can stop being
 authoritative quickly. A node that is alive must also be able to take over
-rooms that were owned by a node that disappeared without a graceful close.
+// rooms that were owned by a node that disappeared without a graceful close.
 // Reclamation is done atomically with the room-state owner update so a
 // recovered room cannot keep advertising the previous node as its owner.
 func init() {
