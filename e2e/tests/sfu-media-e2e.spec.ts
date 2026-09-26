@@ -190,7 +190,7 @@ test("two browser clients publish/receive media and recover on SFU failover", as
     execFileSync("docker", ["compose", "-f", composeFile, "stop", "sfu-primary"], { stdio: "inherit" });
     await Promise.all([waitDisconnected(pageA), waitDisconnected(pageB)]);
 
-    execFileSync("docker", ["compose", "-f", composeFile, "start", "sfu-secondary"], { stdio: "inherit" });
+    execFileSync("docker", ["compose", "-f", composeFile, "up", "-d", "sfu-secondary"], { stdio: "inherit" });
     await waitHealth(secondary);
 
     const [secondA, secondB] = await Promise.all([
