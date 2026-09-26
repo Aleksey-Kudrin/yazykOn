@@ -218,11 +218,12 @@ func clusterLoadTrackStates(roomID string) []clusterTrackState {
 
 
 type clusterRoomState struct {
-	RoomID string `json:"roomId"`
-	HostID string `json:"hostId"`
-	Locked bool `json:"locked"`
-	Lobby bool `json:"lobby"`
-	UpdatedAt int64 `json:"updatedAt"`
+	RoomID      string `json:"roomId"`
+	HostID      string `json:"hostId"`
+	Locked      bool   `json:"locked"`
+	Lobby       bool   `json:"lobby"`
+	OwnerNodeID string `json:"ownerNodeId"`
+	UpdatedAt   int64  `json:"updatedAt"`
 }
 
 func clusterSaveRoomState(room *Room) {
@@ -231,7 +232,10 @@ func clusterSaveRoomState(room *Room) {
 	clusterMu.RUnlock()
 	if client == nil || !clusterReady.Load() { return }
 	room.mu.RLock()
-	state := clusterRoomState{RoomID: room.id, HostID: room.hostID, Locked: room.locked, Lobby: room.lobby, UpdatedAt: time.Now().Unix()}
+	clusterMu.RLock()
+	nodeID := clusterNodeID
+	clusterMu.RUnlock()
+	state := clusterRoomState{RoomID: room.id, HostID: room.hostID, Locked: room.locked, Lobby: room.lobby, OwnerNodeID: nodeID, UpdatedAt: time.Now().Unix()}
 	room.mu.RUnlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
