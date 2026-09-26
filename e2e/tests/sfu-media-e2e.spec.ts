@@ -45,8 +45,6 @@ async function connectClient(page: Page, endpoint: string, userId: string, role:
 
     const pc = new RTCPeerConnection();
     const ws = new WebSocket(wsUrl);
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-    stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
     let localOffer = false;
     const pendingIce: RTCIceCandidateInit[] = [];
@@ -79,6 +77,9 @@ async function connectClient(page: Page, endpoint: string, userId: string, role:
       ws.onerror = () => state.errors.push("websocket-error");
     });
     await waitOpen;
+
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
     ws.onmessage = async event => {
       const message = JSON.parse(event.data);
