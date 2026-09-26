@@ -51,6 +51,7 @@ function delta(a: Metrics, b: Metrics, name: string) {
 }
 
 test("SFU long soak keeps health, runtime metrics and failover errors bounded", async ({ page }) => {
+  test.setTimeout(durationMs + 60000);
   test.skip(!process.env.SFU_FAILOVER_LIVE, "Set SFU_FAILOVER_LIVE=1 for the live Docker run");
 
   await waitHealth(primary);
