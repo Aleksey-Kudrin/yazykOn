@@ -36,12 +36,9 @@ func clusterReclaimExpiredRooms() {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	keys, err := client.Keys(ctx, "yazykon:sfu:state:*").Result()
-	if err != nil {
-		return
-	}
-
-	for _, stateKey := range keys {
+	iter := client.Scan(ctx, 0, "yazykon:sfu:state:*", 128).Iterator()
+	for iter.Next(ctx) {
+		stateKey := iter.Val()
 		roomID := strings.TrimPrefix(stateKey, "yazykon:sfu:state:")
 		if roomID == "" {
 			continue
@@ -59,5 +56,8 @@ func clusterReclaimExpiredRooms() {
 			failoverClaims.Add(1)
 			log.Printf("SFU room ownership reclaimed: room=%s node=%s", roomID, nodeID)
 		}
+	}
+	if err := iter.Err(); err != nil {
+		return
 	}
 }
