@@ -1,0 +1,32 @@
+services:
+  sfu-primary:
+    build:
+      context: ../media
+    environment:
+      ROOM_ACCESS_SECRET: soak-test-room-secret
+      MEDIA_CONTROL_SECRET: soak-test-control-secret
+    ports:
+      - "4100:4000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:4000/health", timeout=2)'"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+      start_period: 2s
+
+  sfu-secondary:
+    build:
+      context: ../media
+    environment:
+      ROOM_ACCESS_SECRET: soak-test-room-secret
+      MEDIA_CONTROL_SECRET: soak-test-control-secret
+    ports:
+      - "4200:4000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:4000/health", timeout=2)'"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+      start_period: 2s
