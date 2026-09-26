@@ -1,0 +1,24 @@
+services:
+  sfu-primary:
+    build:
+      context: ../media
+    environment:
+      ROOM_ACCESS_SECRET: media-e2e-room-secret
+      MEDIA_CONTROL_SECRET: media-e2e-control-secret
+      WEBRTC_PUBLIC_IP: 127.0.0.1
+    ports:
+      - "4100:4000"
+      - "50000-50100:50000-50100/udp"
+    restart: "no"
+
+  sfu-secondary:
+    build:
+      context: ../media
+    environment:
+      ROOM_ACCESS_SECRET: media-e2e-room-secret
+      MEDIA_CONTROL_SECRET: media-e2e-control-secret
+      WEBRTC_PUBLIC_IP: 127.0.0.1
+    ports:
+      - "4200:4000"
+      - "50000-50100:50000-50100/udp"
+    restart: "no"
